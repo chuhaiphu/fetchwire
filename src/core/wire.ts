@@ -39,10 +39,27 @@ export async function wireApi<T>(
         response.status
       );
 
-      // Trigger Interceptors
-      if (response.status === 401 && config.interceptors?.onUnauthorized) {
+      // Resolve effective status-code mappings with default values
+      const unauthorizedStatusCodes =
+        config.unauthorizedStatusCodes && config.unauthorizedStatusCodes.length > 0
+          ? config.unauthorizedStatusCodes
+          : [401];
+
+      const forbiddenStatusCodes =
+        config.forbiddenStatusCodes && config.forbiddenStatusCodes.length > 0
+          ? config.forbiddenStatusCodes
+          : [403];
+
+      // Trigger interceptors based on configured status codes
+      if (
+        config.interceptors?.onUnauthorized &&
+        unauthorizedStatusCodes.includes(response.status)
+      ) {
         config.interceptors.onUnauthorized(apiError);
-      } else if (response.status === 403 && config.interceptors?.onForbidden) {
+      } else if (
+        config.interceptors?.onForbidden &&
+        forbiddenStatusCodes.includes(response.status)
+      ) {
         config.interceptors.onForbidden(apiError);
       } else if (config.interceptors?.onError) {
         config.interceptors.onError(apiError);

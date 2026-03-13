@@ -1,7 +1,7 @@
 {
   "name": "fetchwire",
   "version": "1.0.0",
-  "description": "A library for intercepting API requests and responses with hooks",
+  "description": "A lightweight, focused API fetching library for React and React Native applications.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
