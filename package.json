@@ -1,0 +1,27 @@
+{
+  "name": "fetchwire",
+  "version": "1.0.0",
+  "description": "A library for intercepting API requests and responses with hooks",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "fetch",
+    "fetchwire",
+    "hooks"
+  ],
+  "author": "Doanvinhphu",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}

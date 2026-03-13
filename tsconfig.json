@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    // "ES2020" -> Javascript output code will be ES2020 standard
+    "target": "ES2020",
+
+    // Type definitions for built-in JS APIs.
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+    // How imports are resolved
+    "module": "ESNext",
+
+    // Determines the algorithm used for finding/resolving modules e.g. looking in node_modules or searching relative paths.
+    "moduleResolution": "bundler",
+
+    // Declaration
+    // It will create a `.d.ts` file.
+    "declaration": true,
+
+    // NoEmit
+    // It will not emit any files, only check for errors.
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+  },
+  "include": ["src"]
+}
