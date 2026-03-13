@@ -23,5 +23,15 @@
     "@types/react": "^19.2.14",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3"
-  }
+  },
+  "funding": [
+    {
+      "type": "ko-fi",
+      "url": "https://ko-fi.com/doanvinhphu"
+    },
+    {
+      "type": "custom",
+      "url": "https://paypal.me/doanvinhphu"
+    }
+  ]
 }
