@@ -1,7 +1,14 @@
 {
   "name": "fetchwire",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A lightweight, focused API fetching library for React and React Native applications.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chuhaiphu/fetchwire.git"
+  },
+  "publishConfig": {
+    "provenance": true
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
