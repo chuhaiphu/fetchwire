@@ -1,18 +1,16 @@
 # fetchwire
 
-A lightweight, focused API fetching library for React and React Native applications.
+A lightweight, focused API fetching library for **React and React Native** applications.
 
 **fetchwire** wraps the native `fetch` API in a global configuration layer. It is designed to make it easy to:
-
 - Centralize your API base URL, auth token, and common headers.
-- Handle errors consistently through a single `ApiError` type.
+- Handle errors consistently.
 
 ### When to use fetchwire
 - **React / React Native apps** that:
   - Want a **simple**, centralized way to call HTTP APIs.
   - Prefer plain hooks over a heavier state management or query library.
   - Need basic tag-based invalidation without a full cache layer.
-  - Handle errors in a consistent way across screens.
 
 ### When not to use fetchwire
 - Consider a more full-featured solution (e.g. TanStack Query / React Query, SWR, RTK Query) if:
@@ -29,28 +27,15 @@ If you find **fetchwire** helpful and want to support its development, you can b
 Your support helps maintain the library and keep it up to date!
 
 ## Features
-
-- **Global configuration with `initWire`**
+- **Global API fetching configuration `initWire`**
   - Configure `baseUrl`, default headers, and how to read the auth token.
   - Optionally register global interceptors for 401/403/other errors.
-  - Customize which HTTP status codes are treated as **unauthorized** or **forbidden** via `unauthorizedStatusCodes` and `forbiddenStatusCodes` (defaults to `[401]` and `[403]`).
+  - Converts server/network errors into a typed `ApiError`.
 
-- **Typed HTTP wrapper with `wireApi`**
-  - Thin wrapper around `fetch` that:
-    - Appends the endpoint to a global `baseUrl`.
-    - Adds auth headers from `getToken`.
-    - Merges default and per-request headers.
-    - Converts server/network errors into a typed `ApiError`.
-
-- **React hooks for requests**
+- **React hooks for data fetching and mutation with Tag-based invalidation**
   - **`useFetchFn<T>`** for data fetching
   - **`useMutationFn<T>`** for mutations
-
-- **Tag-based invalidation**
-  - `useFetchFn` can subscribe to **tags**.
-  - `useMutationFn` can **invalidate tags** after a successful mutation.
-  - This gives you a simple, explicit way to refetch related data without a complex cache layer.
-
+  - With a simple, explicit way to refetch related data through tags
 ---
 
 ## Installation
@@ -64,8 +49,6 @@ pnpm add fetchwire
 ```
 
 ### Peer expectations
-
-- React or React Native project using function components and hooks.
 - TypeScript is recommended but not required.
 - For React Native / Expo, make sure the global `fetch` is available (default in modern RN/Expo).
 
@@ -407,7 +390,7 @@ You can also read `error` directly from `useFetchFn` state if you want to render
 
 ---
 
-## Configuration Reference
+## API Reference
 
 ### `initWire(config)`
 
@@ -463,8 +446,6 @@ function getWireConfig(): WireConfig;
 - Intended for advanced usage (e.g. custom hooks or libraries that build on top of fetchwire).
 
 ---
-
-## API Reference
 
 ### `wireApi<T>(endpoint, options?)`
 
