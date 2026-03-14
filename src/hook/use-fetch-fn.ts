@@ -15,7 +15,10 @@ interface FetchState<T> {
  * @param options - Has tags property that will trigger refetching of the useFetchFn with the given tags.
  * @returns The state of the fetch and the fetch function.
  */
-export function useFetchFn<T>(options?: FetchOptions) {
+export function useFetchFn<T>(
+  fetchFn: () => Promise<HttpResponse<T>>,
+  options?: FetchOptions
+) {
   const [state, setState] = useState<FetchState<T>>({
     data: null,
     isLoading: false,
@@ -34,10 +37,9 @@ export function useFetchFn<T>(options?: FetchOptions) {
   }, []);
 
   const execute = useCallback(
-    async (
-      fetchFn: () => Promise<HttpResponse<T>>,
-      execOptions: { isRefresh: boolean }
-    ): Promise<HttpResponse<T> | null> => {
+    async (execOptions: {
+      isRefresh: boolean;
+    }): Promise<HttpResponse<T> | null> => {
       lastFetchFn.current = fetchFn;
 
       setState((prev) => ({
@@ -76,18 +78,10 @@ export function useFetchFn<T>(options?: FetchOptions) {
   );
 
   const executeFetchFn = useCallback(
-    (fetchFn: () => Promise<HttpResponse<T>>) => {
-      return execute(fetchFn, { isRefresh: false });
-    },
+    () => execute({ isRefresh: false }),
     [execute]
   );
-
-  const refreshFetchFn = useCallback(() => {
-    if (lastFetchFn.current) {
-      return execute(lastFetchFn.current, { isRefresh: true });
-    }
-    return null;
-  }, [execute]);
+  const refreshFetchFn = useCallback(() => execute({ isRefresh: true }), [execute]);
 
   useEffect(() => {
     if (!options?.tags || options.tags.length === 0) return;

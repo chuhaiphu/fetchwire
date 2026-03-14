@@ -3,22 +3,26 @@
 A lightweight, focused API fetching library for **React and React Native** applications.
 
 **fetchwire** wraps the native `fetch` API in a global configuration layer. It is designed to make it easy to:
+
 - Centralize your API base URL, auth token, and common headers.
 - Handle errors consistently.
 
 ### When to use fetchwire
+
 - **React / React Native apps** that:
   - Want a **simple**, centralized way to call HTTP APIs.
   - Prefer plain hooks over a heavier state management or query library.
   - Need basic tag-based invalidation without a full cache layer.
 
 ### When not to use fetchwire
+
 - Consider a more full-featured solution (e.g. TanStack Query / React Query, SWR, RTK Query) if:
   - You need advanced, automatic caching strategies.
   - You need built-in pagination helpers, infinite queries.
   - You need a more powerful data-fetching library and you want to avoid overlap.
 
 ## Support
+
 If you find **fetchwire** helpful and want to support its development, you can buy me a coffee via:
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/doanvinhphu)
@@ -27,15 +31,17 @@ If you find **fetchwire** helpful and want to support its development, you can b
 Your support helps maintain the library and keep it up to date!
 
 ## Features
+
 - **Global API fetching configuration `initWire`**
   - Configure `baseUrl`, default headers, and how to read the auth token.
   - Optionally register global interceptors for 401/403/other errors.
   - Converts server/network errors into a typed `ApiError`.
 
-- **React hooks for data fetching and mutation with Tag-based invalidation**
-  - **`useFetchFn<T>`** for data fetching
-  - **`useMutationFn<T>`** for mutations
+- **React hooks for data fetching and mutation with tag-based invalidation**
+  - **`useFetchFn`** for data fetching
+  - **`useMutationFn`** for mutations
   - With a simple, explicit way to refetch related data through tags
+
 ---
 
 ## Installation
@@ -49,6 +55,7 @@ pnpm add fetchwire
 ```
 
 ### Peer expectations
+
 - TypeScript is recommended but not required.
 - For React Native / Expo, make sure the global `fetch` is available (default in modern RN/Expo).
 
@@ -106,7 +113,7 @@ setupWire();
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <App />
-  </React.StrictMode>,
+  </React.StrictMode>
 );
 ```
 
@@ -160,18 +167,18 @@ You can organize similar helpers for users, invoices, organizations, uploads, et
 
 ### 2. Fetch data with `useFetchFn`
 
-`useFetchFn<T>` is a generic hook that manages state for running an async function returning `{ data: T }`.
+`useFetchFn` is a generic hook that manages state for running an async function returning `HttpResponse<T>`, where `T` is **inferred** from your API helper.
 
 **Key ideas:**
 
-- You **do not** pass the async function into the hook directly.
-- Instead, the hook returns `executeFetchFn`, which you call with a function that performs your API request.
+- You pass a **pre-typed API helper** (e.g. `getTodosApi`) into the hook once.
+- The hook infers the data type `T` from that helper, so you rarely need to write `<T>` in components.
 - The hook tracks:
   - `data: T | null`
   - `isLoading: boolean`
   - `isRefreshing: boolean`
   - `error: ApiError | null`
-  - `executeFetchFn(fetchFn)`
+  - `executeFetchFn()`
   - `refreshFetchFn()`
 
 Example: loading and refreshing a todo list in a React component:
@@ -190,12 +197,12 @@ export function TodoList() {
     error,
     executeFetchFn: fetchTodos,
     refreshFetchFn: refreshTodos,
-  } = useFetchFn<Todo[]>({
+  } = useFetchFn(getTodosApi, {
     tags: ['todos'],
   });
 
   useEffect(() => {
-    fetchTodos(() => getTodosApi());
+    fetchTodos();
   }, [fetchTodos]);
 
   if (isLoading) return <div>Loading...</div>;
@@ -223,7 +230,7 @@ export function TodoList() {
 
 ### 3. Mutate data with `useMutationFn`
 
-`useMutationFn<T>` is a hook for mutations (create/update/delete). It:
+`useMutationFn` is a hook for mutations (create/update/delete). It:
 
 - Tracks `data` and `isMutating`.
 - Lets you invalidate **tags** after a successful mutation.
@@ -237,8 +244,10 @@ const {
   isMutating,
   executeMutationFn,
   reset,
-} = useMutationFn<T>({ invalidatesTags?: string[] });
+} = useMutationFn(mutationFn, { invalidatesTags?: string[] });
 ```
+
+`T` is inferred from the `mutationFn` return type (`Promise<HttpResponse<T>>`), so components usually do not need to specify generics.
 
 Example: creating and toggling todos with `useMutationFn`:
 
@@ -259,36 +268,42 @@ export function TodoActions() {
   const {
     isMutating: isCreating,
     executeMutationFn: createTodo,
-  } = useMutationFn<Todo>({
+  } = useMutationFn(() => createTodoApi({ title }), {
     invalidatesTags: ['todos'],
   });
 
   const {
     isMutating: isToggling,
     executeMutationFn: toggleTodo,
-  } = useMutationFn<Todo>({
-    invalidatesTags: ['todos'],
-  });
+  } = useMutationFn(
+    (id: string) => toggleTodoApi(id),
+    {
+      invalidatesTags: ['todos'],
+    }
+  );
 
   const {
     isMutating: isDeleting,
     executeMutationFn: deleteTodo,
-  } = useMutationFn<null>({
-    invalidatesTags: ['todos'],
-  });
+  } = useMutationFn(
+    (id: string) => deleteTodoApi(id),
+    {
+      invalidatesTags: ['todos'],
+    }
+  );
 
   const handleCreate = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
-    createTodo(() => createTodoApi({ title }), {
+    createTodo({
       onSuccess: () => setTitle(''),
     });
   };
 
   // Example usage of toggleTodo and deleteTodo in your UI:
-  // toggleTodo(() => toggleTodoApi(todoId))
-  // deleteTodo(() => deleteTodoApi(todoId))
+  // toggleTodo({ onSuccess: () => ..., onError: (error) => ... });
+  // deleteTodo({ onSuccess: () => ..., onError: (error) => ... });
 
   return (
     <form onSubmit={handleCreate}>
@@ -311,8 +326,8 @@ export function TodoActions() {
 
 Tags provide a simple way to coordinate refetches across your app:
 
-- `useFetchFn({ tags: [...] })` subscribes the hook to one or more **tags**.
-- `useMutationFn({ invalidatesTags: [...] })` emits those tags after a **successful** mutation.
+- `useFetchFn(fetchFn, { tags: [...] })` subscribes the hook to one or more **tags**.
+- `useMutationFn(mutationFn, { invalidatesTags: [...] })` emits those tags after a **successful** mutation.
 - When a tag is emitted, all subscribed fetch hooks will automatically **call `refreshFetchFn`**.
 
 This pattern keeps your code explicit and small, without introducing a full query cache library.
@@ -452,7 +467,7 @@ function getWireConfig(): WireConfig;
 ```ts
 async function wireApi<T>(
   endpoint: string,
-  options?: RequestInit & { headers?: Record<string, string> },
+  options?: RequestInit & { headers?: Record<string, string> }
 ): Promise<HttpResponse<T>>;
 ```
 
@@ -483,7 +498,9 @@ function useFetchFn<T>(options?: FetchOptions): {
   isLoading: boolean;
   isRefreshing: boolean;
   error: ApiError | null;
-  executeFetchFn: (fetchFn: () => Promise<{ data: T }>) => Promise<{ data: T } | null>;
+  executeFetchFn: (
+    fetchFn: () => Promise<{ data: T }>
+  ) => Promise<{ data: T } | null>;
   refreshFetchFn: () => Promise<{ data: T } | null> | null;
 };
 ```
@@ -515,7 +532,7 @@ function useMutationFn<T>(options?: MutationOptions): {
   isMutating: boolean;
   executeMutationFn: (
     mutationFn: () => Promise<{ data: T }>,
-    executeOptions?: ExecuteOptions<T>,
+    executeOptions?: ExecuteOptions<T>
   ) => Promise<{ data: T } | null>;
   reset: () => void;
 };
@@ -546,4 +563,3 @@ function useMutationFn<T>(options?: MutationOptions): {
 Copyright (c) Doanvinhphu
 
 See the `LICENSE` file for details (or include the standard MIT text directly in your repository).
-

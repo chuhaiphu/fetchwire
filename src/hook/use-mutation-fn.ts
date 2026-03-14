@@ -10,10 +10,14 @@ interface MutationState<T> {
 
 /**
  * A hook for executing a mutation function and managing the state of the mutation.
+ * @param mutationFn - The mutation function to execute.
  * @param options - Has invalidatesTags property that will trigger refetching of the useFetchFn with the given tags.
  * @returns The state of the mutation and the mutation function.
  */
-export function useMutationFn<T>(options?: MutationOptions) {
+export function useMutationFn<T>(
+  mutationFn: () => Promise<HttpResponse<T>>,
+  options?: MutationOptions
+) {
   const [state, setState] = useState<MutationState<T>>({
     data: null,
     isMutating: false,
@@ -29,7 +33,6 @@ export function useMutationFn<T>(options?: MutationOptions) {
 
   const executeMutationFn = useCallback(
     async (
-      mutationFn: () => Promise<HttpResponse<T>>,
       executeOptions?: ExecuteMutationOptions<T>
     ): Promise<HttpResponse<T> | null> => {
       setState((prev) => ({ ...prev, isMutating: true }));
@@ -63,7 +66,7 @@ export function useMutationFn<T>(options?: MutationOptions) {
         return null;
       }
     },
-    [options?.invalidatesTags]
+    [mutationFn, options?.invalidatesTags]
   );
 
   const reset = useCallback(() => {
