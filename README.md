@@ -3,14 +3,13 @@
 A lightweight, focused API fetching library for **React and React Native** applications.
 
 **fetchwire** wraps the native `fetch` API in a global configuration layer. It is designed to make it easy to:
-
 - Centralize your API base URL, auth token, and common headers.
 - Handle errors consistently.
 
 ### When to use fetchwire
 
 - **React / React Native apps** that:
-  - Want a **simple**, centralized way to call HTTP APIs.
+  - Want a **simple**, centralized way for API fetching setup.
   - Prefer plain hooks over a heavier state management or query library.
   - Need basic tag-based invalidation without a full cache layer.
 
@@ -27,8 +26,6 @@ If you find **fetchwire** helpful and want to support its development, you can b
 
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/doanvinhphu)
 [![PayPal](https://img.shields.io/badge/PayPal-004595?style=for-the-badge&logo=paypal&logoColor=white)](https://paypal.me/doanvinhphu)
-
-Your support helps maintain the library and keep it up to date!
 
 ## Features
 
@@ -80,6 +77,7 @@ export function setupWire() {
       'x-client': 'web',
     },
     getToken: async () => {
+      // Called on each request — return the current access token or null.
       // Read token from localStorage (or any storage you prefer)
       return localStorage.getItem('access_token');
     },
@@ -172,7 +170,6 @@ You can organize similar helpers for users, invoices, organizations, uploads, et
 **Key ideas:**
 
 - You pass a **pre-typed API helper** (e.g. `getTodosApi`) into the hook once.
-- The hook infers the data type `T` from that helper, so you rarely need to write `<T>` in components.
 - The hook tracks:
   - `data: T | null`
   - `isLoading: boolean`
@@ -247,7 +244,8 @@ const {
 } = useMutationFn(mutationFn, { invalidatesTags?: string[] });
 ```
 
-`T` is inferred from the `mutationFn` return type (`Promise<HttpResponse<T>>`), so components usually do not need to specify generics.
+- If `mutationFn` has **no parameters**, call `executeMutationFn({ onSuccess, onError })`.
+- If `mutationFn` has **one parameter** (e.g. update payload), call `executeMutationFn(variables, { onSuccess, onError })`.
 
 Example: creating and toggling todos with `useMutationFn`:
 
@@ -277,9 +275,7 @@ export function TodoActions() {
     executeMutationFn: toggleTodo,
   } = useMutationFn(
     (id: string) => toggleTodoApi(id),
-    {
-      invalidatesTags: ['todos'],
-    }
+    { invalidatesTags: ['todos'] }
   );
 
   const {
@@ -287,9 +283,7 @@ export function TodoActions() {
     executeMutationFn: deleteTodo,
   } = useMutationFn(
     (id: string) => deleteTodoApi(id),
-    {
-      invalidatesTags: ['todos'],
-    }
+    { invalidatesTags: ['todos'] }
   );
 
   const handleCreate = (e: FormEvent) => {
@@ -301,9 +295,9 @@ export function TodoActions() {
     });
   };
 
-  // Example usage of toggleTodo and deleteTodo in your UI:
-  // toggleTodo({ onSuccess: () => ..., onError: (error) => ... });
-  // deleteTodo({ onSuccess: () => ..., onError: (error) => ... });
+  // With variables, pass payload first then options:
+  // toggleTodo(todoId, { onSuccess: () => ..., onError: (error) => ... });
+  // deleteTodo(todoId, { onSuccess: () => ..., onError: (error) => ... });
 
   return (
     <form onSubmit={handleCreate}>
@@ -391,13 +385,18 @@ With `useMutationFn`, you commonly handle errors with `onError`:
 ```tsx
 import { ApiError } from 'fetchwire';
 
-executeMutationFn(() => someMutationApi(), {
-  onSuccess: () => {
-    // success logic
-  },
+// No variables: pass only options
+executeMutationFn({
+  onSuccess: () => { /* success logic */ },
   onError: (error: ApiError) => {
     Alert.alert('Login failed', error.message || 'Unexpected error');
   },
+});
+
+// With variables: pass variables first, then options
+executeMutationFn(payload, {
+  onSuccess: (data) => { /* ... */ },
+  onError: (error: ApiError) => { /* ... */ },
 });
 ```
 
@@ -430,7 +429,7 @@ function initWire(config: WireConfig): void;
 
 - **`baseUrl`**: Base API URL (e.g. `'https://api.example.com'`).
 - **`headers`**: Global headers to apply to every request.
-- **`getToken`**: Async function that returns a bearer token or `null`. If present, fetchwire adds `Authorization: Bearer <token>`.
+- **`getToken`**: Async function called on each request; return the current access token or `null`. If a non-empty string is returned, fetchwire sends it as `Authorization: Bearer <token>`.
 - **`interceptors`** (optional):
   - `onUnauthorized(error)`: Called when a 401 is returned.
   - `onForbidden(error)`: Called when a 403 is returned.
@@ -486,73 +485,76 @@ const result = await wireApi<UserResponse>('/user/me', { method: 'GET' });
 
 ---
 
-### `useFetchFn<T>(options?)`
+### `useFetchFn<T>(fetchFn, options?)`
 
 ```ts
 type FetchOptions = {
   tags?: string[];
 };
 
-function useFetchFn<T>(options?: FetchOptions): {
+function useFetchFn<T>(
+  fetchFn: () => Promise<HttpResponse<T>>,
+  options?: FetchOptions
+): {
   data: T | null;
   isLoading: boolean;
   isRefreshing: boolean;
   error: ApiError | null;
-  executeFetchFn: (
-    fetchFn: () => Promise<{ data: T }>
-  ) => Promise<{ data: T } | null>;
-  refreshFetchFn: () => Promise<{ data: T } | null> | null;
+  executeFetchFn: () => Promise<HttpResponse<T> | null>;
+  refreshFetchFn: () => Promise<HttpResponse<T> | null> | null;
 };
 ```
 
+- **`fetchFn`**: Async function (e.g. an API helper using `wireApi<T>`). Type `T` is inferred from its return type.
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetchFn` is called automatically.
-- **`executeFetchFn`**:
-  - Executes the provided async function.
-  - Updates `data`, `isLoading`, `error`.
-  - Stores the last function so it can be used by `refreshFetchFn`.
-- **`refreshFetchFn`**:
-  - Re-runs the last `executeFetchFn` call, setting `isRefreshing` during the call.
+- **`executeFetchFn()`**: Runs `fetchFn` (no arguments). Updates `data`, `isLoading`, `error`.
+- **`refreshFetchFn()`**: Re-runs the same `fetchFn`, setting `isRefreshing` during the call.
 
 ---
 
-### `useMutationFn<T>(options?)`
+### `useMutationFn<T>(mutationFn, options?)` (no variables)  
+### `useMutationFn<T, TVariables>(mutationFn, options?)` (with variables)
 
 ```ts
 type MutationOptions = {
   invalidatesTags?: string[];
 };
 
-type ExecuteOptions<T> = {
-  onSuccess?: (data: T | null) => void;
+type ExecuteMutationOptions<T> = {
+  onSuccess?: (data: T) => void;
   onError?: (error: ApiError) => void;
 };
 
-function useMutationFn<T>(options?: MutationOptions): {
+// No variables: mutationFn has no parameters
+function useMutationFn<T>(
+  mutationFn: () => Promise<HttpResponse<T>>,
+  options?: MutationOptions
+): {
   data: T | null;
   isMutating: boolean;
-  executeMutationFn: (
-    mutationFn: () => Promise<{ data: T }>,
-    executeOptions?: ExecuteOptions<T>
-  ) => Promise<{ data: T } | null>;
+  executeMutationFn: (executeOptions?: ExecuteMutationOptions<T>) => Promise<HttpResponse<T> | null>;
+  reset: () => void;
+};
+
+// With variables: mutationFn accepts one argument (e.g. update payload)
+function useMutationFn<T, TVariables>(
+  mutationFn: (variables: TVariables) => Promise<HttpResponse<T>>,
+  options?: MutationOptions
+): {
+  data: T | null;
+  isMutating: boolean;
+  executeMutationFn: (variables: TVariables, executeOptions?: ExecuteMutationOptions<T>) => Promise<HttpResponse<T> | null>;
   reset: () => void;
 };
 ```
 
-- **`options.invalidatesTags`**:
-  - List of tags to emit after a **successful** mutation.
-  - All `useFetchFn` hooks that subscribed to any of these tags will be refreshed.
+- **`mutationFn`**: Async function that returns `Promise<HttpResponse<T>>`. If it takes one parameter, `executeMutationFn` will require that variable as the first argument.
+- **`options.invalidatesTags`**: Tags to emit after a **successful** mutation; subscribed `useFetchFn` hooks refresh.
 - **`executeMutationFn`**:
-  - Executes the provided `mutationFn`.
-  - Sets `isMutating` while running.
-  - On success:
-    - Updates `data`.
-    - Emits all `invalidatesTags`.
-    - Calls `onSuccess` with `response.data` (or `null`).
-  - On error:
-    - Resets `isMutating`.
-    - Calls `onError` with an `ApiError` instance.
-- **`reset`**:
-  - Resets `data` and `isMutating` to initial values.
+  - **No variables:** `executeMutationFn({ onSuccess, onError })`.
+  - **With variables:** `executeMutationFn(variables, { onSuccess, onError })`.
+  - Sets `isMutating` while running; on success updates `data`, emits tags, calls `onSuccess`; on error calls `onError`.
+- **`reset()`**: Resets `data` and `isMutating` to initial values.
 
 ---
 

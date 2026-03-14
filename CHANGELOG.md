@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.1.0] - 2026-03-15
+
+### Added
+
+- **`useMutationFn` with variables**  
+  Mutations that need a different payload each time (e.g. update invoice, update project) can now pass **variables** into the helper and into `executeMutationFn`, so you no longer need refs or closure workarounds.
+
+  - **Helper with one parameter**  
+    If the first argument to `useMutationFn` is a function that takes one argument (e.g. `(variables) => updateApi(id, variables)`), then `executeMutationFn` is called as:
+    - `executeMutationFn(variables, { onSuccess, onError })`
+  - **Helper with no parameters**  
+    If the helper has no parameters (e.g. `() => createApi()`), the API is unchanged:
+    - `executeMutationFn({ onSuccess, onError })`
+
+  Example (update with variables):
+
+  ```ts
+  const updateInvoiceHelper = (updatedFields: UpdateInvoiceRequest) =>
+    updateInvoiceApi(invoiceId, updatedFields);
+
+  const { executeMutationFn: updateInvoice } = useMutationFn(updateInvoiceHelper, {
+    invalidatesTags: ['organization-invoice-list'],
+  });
+
+  function handleUpdate(updatedFields: UpdateInvoiceRequest) {
+    updateInvoice(updatedFields, {
+      onSuccess: () => refreshInvoice(),
+      onError: (e) => Alert.alert('Lỗi', e.message),
+    });
+  }
+  ```
+
+  Type inference: `T` is inferred from the helper return type; the variables type is inferred from the helper’s first parameter.
+
+---
+
 ## [2.0.0] - 2026-03-15
 
 ### Breaking Changes
