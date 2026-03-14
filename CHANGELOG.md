@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.1] - 2026-03-15
+
+### Fixed (Hotfix)
+
+- **`useFetchFn`: stale closure when calling `executeFetchFn`**  
+  `execute` was closing over the initial `fetchFn`.
+  **Fix:** Use a ref that is updated every render (`fetchFnRef.current = fetchFn`) and call `fetchFnRef.current()` inside `execute`, with `useCallback(..., [])`. This keeps `executeFetchFn` / `refreshFetchFn` identity stable while always invoking the latest `fetchFn`.
+
+---
+
 ## [2.1.0] - 2026-03-15
 
 ### Added

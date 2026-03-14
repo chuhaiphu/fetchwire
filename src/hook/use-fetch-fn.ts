@@ -27,7 +27,8 @@ export function useFetchFn<T>(
   });
 
   const isMounted = useRef<boolean>(true);
-  const lastFetchFn = useRef<(() => Promise<HttpResponse<T>>) | null>(null);
+  const fetchFnRef = useRef(fetchFn);
+  fetchFnRef.current = fetchFn;
 
   useEffect(() => {
     isMounted.current = true;
@@ -40,7 +41,7 @@ export function useFetchFn<T>(
     async (execOptions: {
       isRefresh: boolean;
     }): Promise<HttpResponse<T> | null> => {
-      lastFetchFn.current = fetchFn;
+      const fn = fetchFnRef.current;
 
       setState((prev) => ({
         ...prev,
@@ -50,7 +51,7 @@ export function useFetchFn<T>(
       }));
 
       try {
-        const response = await fetchFn();
+        const response = await fn();
 
         if (isMounted.current) {
           setState({
