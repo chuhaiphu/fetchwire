@@ -1,6 +1,6 @@
 {
   "name": "fetchwire",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "A lightweight, focused API fetching library for React and React Native applications.",
   "repository": {
     "type": "git",
