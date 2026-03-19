@@ -68,7 +68,23 @@ export async function wireApi<T>(
       throw apiError;
     }
 
-    return await response.json();
+    const result = await response.json();
+    if (config.transformResponse) {
+      const transformed = config.transformResponse(result);
+
+      return {
+        status: transformed.status,
+        message: transformed.message,
+        data: transformed.data
+      } as HttpResponse<T>;
+    }
+
+    // if the transformResponse is not provided
+    return {
+      data: result.data !== undefined ? result.data : result,
+      status: result.status || result.statusCode || response.status,
+      message: result.message || '',
+    };
   } catch (error) {
     if (error instanceof ApiError) throw error;
     throw new ApiError(

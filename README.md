@@ -3,6 +3,7 @@
 A lightweight, focused API fetching library for **React and React Native** applications.
 
 **fetchwire** wraps the native `fetch` API in a global configuration layer. It is designed to make it easy to:
+
 - Centralize your API base URL, auth token, and common headers.
 - Handle errors consistently.
 
@@ -32,6 +33,7 @@ If you find **fetchwire** helpful and want to support its development, you can b
 - **Global API fetching configuration `initWire`**
   - Configure `baseUrl`, default headers, and how to read the auth token.
   - Optionally register global interceptors for 401/403/other errors.
+  - Optional `transformResponse` function to normalize incoming API responses.
   - Converts server/network errors into a typed `ApiError`.
 
 - **React hooks for data fetching and mutation with tag-based invalidation**
@@ -80,6 +82,19 @@ export function setupWire() {
       // Called on each request — return the current access token or null.
       // Read token from localStorage (or any storage you prefer)
       return localStorage.getItem('access_token');
+    },
+    // Optional: transform response
+    transformResponse(res) {
+      const rawResponse = res as {
+        statusCode?: number;
+        data: object;
+        message?: string;
+      };
+      return {
+        status: rawResponse.statusCode,
+        data: rawResponse.data,
+        message: rawResponse.message || '',
+      };
     },
     // Optional: customize which status codes should trigger auth interceptors
     unauthorizedStatusCodes: [401, 419], // defaults to [401] if omitted
@@ -263,25 +278,19 @@ import {
 export function TodoActions() {
   const [title, setTitle] = useState('');
 
-  const {
-    isMutating: isCreating,
-    executeMutationFn: createTodo,
-  } = useMutationFn(() => createTodoApi({ title }), {
-    invalidatesTags: ['todos'],
-  });
+  const { isMutating: isCreating, executeMutationFn: createTodo } = useMutationFn(
+    () => createTodoApi({ title }),
+    {
+      invalidatesTags: ['todos'],
+    }
+  );
 
-  const {
-    isMutating: isToggling,
-    executeMutationFn: toggleTodo,
-  } = useMutationFn(
+  const { isMutating: isToggling, executeMutationFn: toggleTodo } = useMutationFn(
     (id: string) => toggleTodoApi(id),
     { invalidatesTags: ['todos'] }
   );
 
-  const {
-    isMutating: isDeleting,
-    executeMutationFn: deleteTodo,
-  } = useMutationFn(
+  const { isMutating: isDeleting, executeMutationFn: deleteTodo } = useMutationFn(
     (id: string) => deleteTodoApi(id),
     { invalidatesTags: ['todos'] }
   );
@@ -387,7 +396,9 @@ import { ApiError } from 'fetchwire';
 
 // No variables: pass only options
 executeMutationFn({
-  onSuccess: () => { /* success logic */ },
+  onSuccess: () => {
+    /* success logic */
+  },
   onError: (error: ApiError) => {
     Alert.alert('Login failed', error.message || 'Unexpected error');
   },
@@ -395,8 +406,12 @@ executeMutationFn({
 
 // With variables: pass variables first, then options
 executeMutationFn(payload, {
-  onSuccess: (data) => { /* ... */ },
-  onError: (error: ApiError) => { /* ... */ },
+  onSuccess: (data) => {
+    /* ... */
+  },
+  onError: (error: ApiError) => {
+    /* ... */
+  },
 });
 ```
 
@@ -512,7 +527,8 @@ function useFetchFn<T>(
 
 ---
 
-### `useMutationFn<T>(mutationFn, options?)` (no variables)  
+### `useMutationFn<T>(mutationFn, options?)` (no variables)
+
 ### `useMutationFn<T, TVariables>(mutationFn, options?)` (with variables)
 
 ```ts
@@ -532,7 +548,9 @@ function useMutationFn<T>(
 ): {
   data: T | null;
   isMutating: boolean;
-  executeMutationFn: (executeOptions?: ExecuteMutationOptions<T>) => Promise<HttpResponse<T> | null>;
+  executeMutationFn: (
+    executeOptions?: ExecuteMutationOptions<T>
+  ) => Promise<HttpResponse<T> | null>;
   reset: () => void;
 };
 
@@ -543,7 +561,10 @@ function useMutationFn<T, TVariables>(
 ): {
   data: T | null;
   isMutating: boolean;
-  executeMutationFn: (variables: TVariables, executeOptions?: ExecuteMutationOptions<T>) => Promise<HttpResponse<T> | null>;
+  executeMutationFn: (
+    variables: TVariables,
+    executeOptions?: ExecuteMutationOptions<T>
+  ) => Promise<HttpResponse<T> | null>;
   reset: () => void;
 };
 ```

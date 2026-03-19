@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.2.0] - 2026-03-19
+
+### Added
+
+- **`transformResponse` configuration in `initWire`**
+  You can now provide a global `transformResponse` function to normalize your API response formats into fetchwire's standard `HttpResponse` shape.
+
+  Example:
+
+  ```ts
+  transformResponse(res) {
+    const rawResponse = res as {
+      statusCode?: number;
+      data: object;
+      message?: string;
+    };
+    return {
+      status: rawResponse.statusCode,
+      data: rawResponse.data,
+      message: rawResponse.message || '',
+    };
+  }
+  ```
+
+---
+
 ## [2.1.1] - 2026-03-15
 
 ### Fixed (Hotfix)
@@ -16,7 +42,6 @@
 
 - **`useMutationFn` with variables**  
   Mutations that need a different payload each time (e.g. update invoice, update project) can now pass **variables** into the helper and into `executeMutationFn`, so you no longer need refs or closure workarounds.
-
   - **Helper with one parameter**  
     If the first argument to `useMutationFn` is a function that takes one argument (e.g. `(variables) => updateApi(id, variables)`), then `executeMutationFn` is called as:
     - `executeMutationFn(variables, { onSuccess, onError })`
@@ -51,6 +76,7 @@
 ### Breaking Changes
 
 The APIs for `useFetchFn` and `useMutationFn` now support **automatic type inference**.
+
 - **Shifted arguments**
   - The helper function is now the **first argument** to `useFetchFn` / `useMutationFn`.
   - `executeFetchFn` and `executeMutationFn` **no longer accept a function argument**; they operate on the helper passed into the hook.
@@ -65,7 +91,7 @@ async function getTodosApi() {
 }
 
 // mutation helper
-// The same as createTodoApi 
+// The same as createTodoApi
 async function createTodoApi(input: { title: string }) {
   return wireApi<Todo>('/todos', {
     method: 'POST',
@@ -92,7 +118,7 @@ useEffect(() => {
 
 ```ts
 // component
-// Type is infered from `getTodosApi` 
+// Type is infered from `getTodosApi`
 const { data: todos, executeFetchFn } = useFetchFn(getTodosApi, {
   tags: ['todos'],
 });
@@ -126,7 +152,7 @@ function handleCreate(title: string) {
 
 ```ts
 // component
-// The same as createTodoApi 
+// The same as createTodoApi
 const { isMutating, executeMutationFn } = useMutationFn(
   () => createTodoApi({ title }),
   {

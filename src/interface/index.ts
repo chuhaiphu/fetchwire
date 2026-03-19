@@ -63,6 +63,17 @@ export interface WireConfig {
   getToken: () => Promise<string | null>;
 
   /**
+   * Optional function to transform the raw JSON response from the server into the
+   * standardized `HttpResponse` shape.
+   *
+   * This is useful if your API responses have a different structure and you want
+   * to normalize them for easier consumption in your app.
+   *
+   * If not provided, fetchwire will assume the raw JSON to "data" attribute in the HttpResponse`.
+   */
+  transformResponse?: (json: unknown) => HttpResponse<unknown>;
+
+  /**
    * Optional global interceptors to handle unauthorized/forbidden/other errors.
    */
   interceptors?: WireInterceptors;
