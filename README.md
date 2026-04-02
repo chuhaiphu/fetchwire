@@ -192,6 +192,7 @@ You can organize similar helpers for users, invoices, organizations, uploads, et
   - `error: ApiError | null`
   - `executeFetchFn()`
   - `refreshFetchFn()`
+  - `reset()`
 
 Example: loading and refreshing a todo list in a React component:
 
@@ -434,6 +435,7 @@ type WireConfig = {
   baseUrl: string;
   headers?: Record<string, string>;
   getToken: () => Promise<string | null>;
+  transformResponse?: (res: unknown) => { data?: unknown; message?: string; status?: number };
   interceptors?: WireInterceptors;
   unauthorizedStatusCodes?: number[];
   forbiddenStatusCodes?: number[];
@@ -449,6 +451,7 @@ function initWire(config: WireConfig): void;
   - `onUnauthorized(error)`: Called when a 401 is returned.
   - `onForbidden(error)`: Called when a 403 is returned.
   - `onError(error)`: Called for other error statuses.
+- **`transformResponse`** (optional): A function to normalize your API's response shape into fetchwire's standard `{ data?, message?, status? }` format. Useful when your backend uses a different envelope (e.g. `statusCode` instead of `status`). Called on every successful response before the data reaches your hooks.
 - **`unauthorizedStatusCodes`** (optional): List of HTTP status codes that should be treated as unauthorized (defaults to `[401]`).
 - **`forbiddenStatusCodes`** (optional): List of HTTP status codes that should be treated as forbidden (defaults to `[403]`).
 
@@ -516,7 +519,8 @@ function useFetchFn<T>(
   isRefreshing: boolean;
   error: ApiError | null;
   executeFetchFn: () => Promise<HttpResponse<T> | null>;
-  refreshFetchFn: () => Promise<HttpResponse<T> | null> | null;
+  refreshFetchFn: () => Promise<HttpResponse<T> | null>;
+  reset: () => void;
 };
 ```
 
@@ -524,6 +528,7 @@ function useFetchFn<T>(
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetchFn` is called automatically.
 - **`executeFetchFn()`**: Runs `fetchFn` (no arguments). Updates `data`, `isLoading`, `error`.
 - **`refreshFetchFn()`**: Re-runs the same `fetchFn`, setting `isRefreshing` during the call.
+- **`reset()`**: Resets `data`, `isLoading`, `isRefreshing`, and `error` back to their initial values.
 
 ---
 

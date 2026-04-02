@@ -84,6 +84,10 @@ export function useFetchFn<T>(
   );
   const refreshFetchFn = useCallback(() => execute({ isRefresh: true }), [execute]);
 
+  const reset = useCallback(() => {
+    setState({ data: null, isLoading: false, isRefreshing: false, error: null });
+  }, []);
+
   useEffect(() => {
     if (!options?.tags || options.tags.length === 0) return;
 
@@ -95,5 +99,5 @@ export function useFetchFn<T>(
     return () => subscriptions.forEach((sub) => sub.remove());
   }, [options?.tags, refreshFetchFn]);
 
-  return { ...state, executeFetchFn, refreshFetchFn };
+  return { ...state, executeFetchFn, refreshFetchFn, reset };
 }

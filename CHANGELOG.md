@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.3.0] - 2026-04-02
+
+### Added
+
+- **`reset()` in `useFetchFn`**
+  `useFetchFn` now returns a `reset` function that clears `data`, `isLoading`, `isRefreshing`, and `error` back to their initial values. Useful when navigating away from a screen or unmounting a component that should not retain stale data.
+
+  ```ts
+  const { data, executeFetchFn, reset } = useFetchFn(getTodosApi);
+
+  // Clear state when leaving the screen
+  reset();
+  ```
+
+---
+
 ## [2.2.0] - 2026-03-19
 
 ### Added
