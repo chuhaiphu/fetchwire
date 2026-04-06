@@ -55,7 +55,7 @@ export function useFetchFn<T>(
 
         if (isMounted.current) {
           setState({
-            data: response.data || null,
+            data: response.data ?? null,
             isLoading: false,
             isRefreshing: false,
             error: null,
@@ -88,16 +88,22 @@ export function useFetchFn<T>(
     setState({ data: null, isLoading: false, isRefreshing: false, error: null });
   }, []);
 
+  // Each time the consumer component renders, a brand new options object is created, 
+  // Which would cause the useEffect to re-run, even if the tags are the same.
+  // So we need to create a string key for it by stringifying from options.tags. 
+  // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead. 
+  // This assumes that the tags themselves don't contain commas.
+  const tagsKey = options?.tags?.join(',') ?? '';
   useEffect(() => {
-    if (!options?.tags || options.tags.length === 0) return;
-
-    const subscriptions = options.tags.map((tag) =>
+    if (!tagsKey) return;
+    const tags = tagsKey.split(',');
+    const subscriptions = tags.map((tag) =>
       eventEmitter.addListener(tag, () => {
         refreshFetchFn();
       })
     );
     return () => subscriptions.forEach((sub) => sub.remove());
-  }, [options?.tags, refreshFetchFn]);
+  }, [tagsKey, refreshFetchFn]);
 
   return { ...state, executeFetchFn, refreshFetchFn, reset };
 }

@@ -336,6 +336,8 @@ Tags provide a simple way to coordinate refetches across your app:
 
 This pattern keeps your code explicit and small, without introducing a full query cache library.
 
+> **Constraint:** Tag strings must not contain commas. Commas are used internally to serialize the tag array into a stable dependency key. Use hyphens or underscores as separators instead (e.g. `'user-123'`, `'todo_list'`).
+
 ---
 
 ## Error Handling

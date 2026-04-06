@@ -17,8 +17,8 @@ export async function wireApi<T>(
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
-    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...config.headers,
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...options.headers,
   };
 

@@ -100,6 +100,13 @@ export interface FetchOptions {
    *
    * When a mutation invalidates any of these tags, the hook will automatically
    * re‑run the last request via `refreshFetchFn`.
+   *
+   * @constraint Tag strings must not contain commas. Commas are used internally
+   * to serialize the tag array into a stable dependency key.
+   *
+   * @example
+   * tags: ['todos', 'user-123']   // ✓ valid
+   * tags: ['todo,list']           // ✗ invalid — comma will break tag matching
    */
   tags?: string[];
 }
@@ -113,6 +120,13 @@ export interface MutationOptions {
    *
    * All active `useFetchFn` hooks that subscribed to any of these tags
    * will be notified and refreshed.
+   *
+   * @constraint Tag strings must not contain commas. Commas are used internally
+   * to serialize the tag array into a stable dependency key.
+   *
+   * @example
+   * invalidatesTags: ['todos', 'user-123']   // ✓ valid
+   * invalidatesTags: ['todo,list']           // ✗ invalid — comma will break tag matching
    */
   invalidatesTags?: string[];
 }
@@ -127,7 +141,7 @@ export interface ExecuteMutationOptions<T> {
    *
    * @param data Parsed response data from the server.
    */
-  onSuccess?: (data: T) => void | Promise<void>;
+  onSuccess?: (data: T | null) => void | Promise<void>;
 
   /**
    * Called when the mutation fails with an `ApiError`.

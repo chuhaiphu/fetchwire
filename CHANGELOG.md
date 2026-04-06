@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.3.1] - 2026-04-06
+
+### Fixed
+
+- **`wireApi`**: `config.headers` now merges before the computed `Authorization` header, so per-token auth is no longer silently overridden by global headers.
+- **`useFetchFn`**: use `??` instead of `||` when setting `data`, so falsy values (`0`, `false`, `""`) are no longer replaced with `null`.
+- **`useFetchFn` / `useMutationFn`**: tag arrays are now serialized to a string key before being used as `useEffect` / `useCallback` dependencies, preventing unnecessary re-subscriptions and function recreation on every render.
+
+### Documentation
+
+- Tag strings must not contain commas — documented in JSDoc and README.
+
+---
+
 ## [2.3.0] - 2026-04-02
 
 ### Added

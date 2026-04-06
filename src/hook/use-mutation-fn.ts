@@ -68,6 +68,13 @@ export function useMutationFn<T, TVariables = void>(
     };
   }, []);
 
+  // Each time the consumer component renders, a brand new options object is created,
+  // Which would cause the useEffect to re-run, even if the tags are the same.
+  // So we need to create a string key for it by stringifying from options.tags.
+  // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.
+  // This assumes that the tags themselves don't contain commas.
+  const invalidatesTagsKey = options?.invalidatesTags?.join(',') ?? '';
+
   const executeMutationFn = useCallback(
     async (
       firstArg?: TVariables | ExecuteMutationOptions<T>,
@@ -75,7 +82,9 @@ export function useMutationFn<T, TVariables = void>(
     ): Promise<HttpResponse<T> | null> => {
       const hasTwoArgs = secondArg !== undefined;
       const variables = (hasTwoArgs ? firstArg : undefined) as TVariables;
-      const executeOptions = hasTwoArgs ? secondArg : firstArg as ExecuteMutationOptions<T>;
+      const executeOptions = hasTwoArgs
+        ? secondArg
+        : (firstArg as ExecuteMutationOptions<T>);
 
       setState((prev) => ({ ...prev, isMutating: true }));
 
@@ -88,12 +97,10 @@ export function useMutationFn<T, TVariables = void>(
             isMutating: false,
           });
 
-          options?.invalidatesTags?.forEach((tag) => {
-            eventEmitter.emit(tag);
-          });
-
-          if (response.data != null) executeOptions?.onSuccess?.(response.data);
-          else executeOptions?.onSuccess?.(null as unknown as T);
+          if (invalidatesTagsKey) {
+            invalidatesTagsKey.split(',').forEach((tag) => eventEmitter.emit(tag));
+          }
+          executeOptions?.onSuccess?.(response.data ?? null);
         }
         return response;
       } catch (error) {
@@ -108,7 +115,7 @@ export function useMutationFn<T, TVariables = void>(
         return null;
       }
     },
-    [mutationFn, options?.invalidatesTags]
+    [mutationFn, invalidatesTagsKey]
   );
 
   const reset = useCallback(() => {
