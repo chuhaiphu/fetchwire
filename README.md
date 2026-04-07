@@ -7,6 +7,13 @@ A lightweight, focused API fetching library for **React / React Native+** applic
 - Centralize your API base URL, auth token, and common headers.
 - Handle errors consistently.
 
+## Version note
+
+If you only need regular fetching (non-Suspense) or your project is on **React 18 or below**, use **fetchwire v2.3.1**.
+
+- Docs/package link: https://www.npmjs.com/package/fetchwire/v/2.3.1
+- Install: `npm install fetchwire@2.3.1`
+
 ### When to use fetchwire
 
 - **React / React Native** that:
@@ -498,7 +505,11 @@ type WireConfig = {
   baseUrl: string;
   headers?: HeadersInit;
   getToken: () => Promise<string | null>;
-  transformResponse?: (res: unknown) => { data?: unknown; message?: string; status?: number };
+  transformResponse?: (res: unknown) => {
+    data?: unknown;
+    message?: string;
+    status?: number;
+  };
   interceptors?: WireInterceptors;
   unauthorizedStatusCodes?: number[];
   forbiddenStatusCodes?: number[];
