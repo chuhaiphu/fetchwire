@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.1] - 2026-04-07
+
+### Added
+
+- **`useFetch` now accepts both envelope and raw payload responses**
+  `useFetch` fetch functions can now return either `Promise<HttpResponse<T>>` or `Promise<T>`.
+  This makes the hook easier to use with API helpers that already unwrap data.
+
+- **`extractHttpResponseData` helper**
+  Added an internal helper to normalize `useFetch` responses into payload `T`
+  from either a full `HttpResponse<T>` shape or a raw payload value.
+
+### Documentation
+
+- Updated JSDoc and README for `useFetch` to reflect support for both response shapes.
+
+---
+
+## [3.0.1] - 2026-04-07
+
+### Documentation
+
+- Documentation-only release.
+- Updated README/JSDoc wording only. No runtime behavior changes.
+
+---
+
 ## [3.0.0] - 2026-04-07
 
 ### Added
@@ -14,7 +41,7 @@
     <Suspense fallback={<div>Loading…</div>}>
       <TodoList />
     </Suspense>
-  </ErrorBoundary>
+  </ErrorBoundary>;
 
   // TodoList component
   function TodoList() {
@@ -22,7 +49,13 @@
       tags: ['todos'],
     });
 
-    return <ul>{todos.map(t => <li key={t.id}>{t.title}</li>)}</ul>;
+    return (
+      <ul>
+        {todos.map((t) => (
+          <li key={t.id}>{t.title}</li>
+        ))}
+      </ul>
+    );
   }
   ```
 

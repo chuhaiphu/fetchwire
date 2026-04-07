@@ -118,8 +118,8 @@ export interface MutationOptions {
   /**
    * Tags that should be invalidated after a successful mutation.
    *
-   * All active `useFetchFn` hooks that subscribed to any of these tags
-   * will be notified and refreshed.
+   * All active `useFetch` and `useFetchFn` hooks that subscribed to any of
+   * these tags will be notified and refreshed.
    *
    * @constraint Tag strings must not contain commas. Commas are used internally
    * to serialize the tag array into a stable dependency key.

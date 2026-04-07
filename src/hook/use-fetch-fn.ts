@@ -12,6 +12,7 @@ interface FetchState<T> {
 
 /**
  * A hook for manually handling the execution of a fetch function and managing the state of that fetch.
+ * @param fetch - A promise function that returns `Promise<HttpResponse<T>>`.
  * @param options - Optional `tags` that will trigger a refresh when a
  *   `useMutationFn` with matching `invalidatesTags` completes.
  *   Tag strings must not contain commas.

@@ -1,6 +1,6 @@
 # fetchwire
 
-A lightweight, focused API fetching library for **React / React Native+** applications that use **React 19+**.
+A lightweight, focused API fetching library for **React / React Native+** applications that use **React 19+** with **Suspense support**.
 
 **fetchwire** wraps the native `fetch` API in a global configuration layer. It is designed to make it easy to:
 
@@ -195,6 +195,7 @@ You can organize similar helpers for users, invoices, organizations, uploads, et
 
 - The component suspends while the fetch is in flight — no `isLoading` flag needed.
 - API errors are thrown and caught by the nearest `<ErrorBoundary>`.
+- `fetch` can return either a standard `HttpResponse<T>` envelope or raw data `T`.
 - `fetchKey` uniquely identifies this fetch in the internal promise cache, preventing infinite suspend loops.
 - `refreshFetch` replaces the cached promise and re-suspends the component, showing the `<Suspense>` fallback again.
 
@@ -585,7 +586,7 @@ type FetchOptions = {
 };
 
 function useFetch<T>(
-  fetch: () => Promise<HttpResponse<T>>,
+  fetch: () => Promise<HttpResponse<T> | T>,
   fetchKey: string,
   options?: FetchOptions
 ): {
@@ -596,7 +597,7 @@ function useFetch<T>(
 
 Fetches immediately on mount and **suspends** the component while data is loading. Requires a `<Suspense>` boundary for the loading state and an `<ErrorBoundary>` for API errors in the parent tree.
 
-- **`fetch`**: Async function (e.g. an API helper using `wireApi<T>`). Type `T` is inferred from its return type.
+- **`fetch`**: Async function that can return either `HttpResponse<T>` or raw `T` (e.g. `wireApi<T>` helper or plain transformed payload). Type `T` is inferred from its return type.
 - **`fetchKey`**: Unique string key for this fetch, used to cache the in-flight Promise and prevent infinite re-suspension on re-render.
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetch` is called automatically, re-suspending the component.
 - **`data`**: The resolved value from the fetch. The component suspends until this is available.
@@ -643,7 +644,7 @@ const promiseCacheMap: PromiseCacheMap;
   }
   ```
 
-> **Note:** You typically do not need `promiseCacheMap` for day-to-day use. Tag-based invalidation via `useMutationFn` handles the common refetch case automatically. Reach for `promiseCacheMap` only when you need explicit, imperative control over the cache (e.g. logout flows, deep cache resets).
+> **Note:** Reach for `promiseCacheMap` only when you need explicit, imperative control over the cache (e.g. logout flows, deep cache resets).
 
 ---
 

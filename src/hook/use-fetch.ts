@@ -2,6 +2,7 @@ import { useEffect, useCallback, use, useState } from 'react';
 import { HttpResponse, FetchOptions } from '../interface';
 import { eventEmitter } from '../core/event-emitter';
 import { promiseCacheMap } from '../core/promise-cache-map';
+import { extractHttpResponseData } from '../util/helper';
 
 /**
  * A hook that fetches immediately on mount and suspends
@@ -19,7 +20,8 @@ import { promiseCacheMap } from '../core/promise-cache-map';
  * </ErrorBoundary>
  * ```
  *
- * @param fetch - A promise function that returns `Promise<HttpResponse<T>>`.
+ * @param fetch - A promise function that returns `Promise<HttpResponse<T> | T>`.
+ *   You can return a standard `HttpResponse<T>` envelope or raw data `T`.
  * @param fetchKey - A unique key for this fetch, used for caching promise.
  * @param options - Optional `tags` that will trigger a refresh when a
  *   `useMutationFn` with matching `invalidatesTags` completes.
@@ -32,14 +34,13 @@ import { promiseCacheMap } from '../core/promise-cache-map';
  */
 
 export function useFetch<T>(
-  fetch: () => Promise<HttpResponse<T>>,
+  fetch: () => Promise<HttpResponse<T> | T>,
   fetchKey: string,
   options?: FetchOptions
 ): {
   data: T | null;
   refreshFetch: () => void;
 } {
-
   // Why if we don't cache the promise?
   // 1. Each time the Component is rendered, a new Pending Promise from fetch is created
   // 2. After use(promise) hook run, React will abort the current render, dispose all the states
@@ -53,7 +54,7 @@ export function useFetch<T>(
   if (!promiseCacheMap.has(fetchKey)) {
     promiseCacheMap.set(
       fetchKey,
-      fetch().then((res) => res.data)
+      fetch().then((res) => extractHttpResponseData(res))
     );
   }
 
@@ -65,7 +66,7 @@ export function useFetch<T>(
   // Replaces the current Promise with a new one.
   // use() will see the new Promise and re-suspend the component, showing the <Suspense> fallback.
   const refreshFetch = useCallback(() => {
-    const newPromise = fetch().then((res) => res.data);
+    const newPromise = fetch().then((res) => extractHttpResponseData(res));
     promiseCacheMap.set(fetchKey, newPromise);
     setPromise(newPromise);
   }, [fetch, fetchKey]);
