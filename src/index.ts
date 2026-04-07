@@ -4,3 +4,4 @@ export * from './core/config';
 export * from './core/wire';
 export * from './hook/use-fetch-fn';
 export * from './hook/use-mutation-fn';
+export * from './hook/use-fetch';

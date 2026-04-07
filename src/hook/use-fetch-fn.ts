@@ -11,9 +11,17 @@ interface FetchState<T> {
 }
 
 /**
- * A hook for executing a fetch function and managing the state of the fetch.
- * @param options - Has tags property that will trigger refetching of the useFetchFn with the given tags.
- * @returns The state of the fetch and the fetch function.
+ * A hook for manually handling the execution of a fetch function and managing the state of that fetch.
+ * @param options - Optional `tags` that will trigger a refresh when a
+ *   `useMutationFn` with matching `invalidatesTags` completes.
+ *   Tag strings must not contain commas.
+ * @returns
+ *   - `isLoading` — a boolean indicating if the fetch is currently executing.
+ *   - `isRefreshing` — a boolean indicating if the fetch is currently refreshing.
+ *   - `error` — an error object if the fetch failed, or null if no error occurred.
+ *   - `executeFetchFn` — a function to manually execute the fetch function.
+ *   - `refreshFetchFn` — a function to manually refresh the fetch function.
+ *   - `reset` — a function to manually reset the fetch state.
  */
 export function useFetchFn<T>(
   fetchFn: () => Promise<HttpResponse<T>>,
@@ -28,7 +36,6 @@ export function useFetchFn<T>(
 
   const isMounted = useRef<boolean>(true);
   const fetchFnRef = useRef(fetchFn);
-  fetchFnRef.current = fetchFn;
 
   useEffect(() => {
     isMounted.current = true;
@@ -36,6 +43,10 @@ export function useFetchFn<T>(
       isMounted.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    fetchFnRef.current = fetchFn;
+  }, [fetchFn]);
 
   const execute = useCallback(
     async (execOptions: {
@@ -88,10 +99,10 @@ export function useFetchFn<T>(
     setState({ data: null, isLoading: false, isRefreshing: false, error: null });
   }, []);
 
-  // Each time the consumer component renders, a brand new options object is created, 
+  // Each time the consumer component renders, a brand new options object is created,
   // Which would cause the useEffect to re-run, even if the tags are the same.
-  // So we need to create a string key for it by stringifying from options.tags. 
-  // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead. 
+  // So we need to create a string key for it by stringifying from options.tags.
+  // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.
   // This assumes that the tags themselves don't contain commas.
   const tagsKey = options?.tags?.join(',') ?? '';
   useEffect(() => {

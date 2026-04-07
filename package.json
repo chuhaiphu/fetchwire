@@ -1,7 +1,8 @@
 {
   "name": "fetchwire",
-  "version": "2.3.1",
-  "description": "A lightweight, focused API fetching library for React and React Native applications.",
+  "type": "module",
+  "version": "3.0.0",
+  "description": "A lightweight, focused API fetching library for React 19+ applications.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chuhaiphu/fetchwire.git"
@@ -25,16 +26,22 @@
     "fetchwire",
     "hooks"
   ],
+  "peerDependencies": {
+    "react": ">=19.0.0"
+  },
   "author": "Doanvinhphu",
   "license": "MIT",
   "devDependencies": {
-    "@eslint/js": "^9.15.0",
+    "@eslint/js": "^9.39.4",
     "@types/react": "^19.2.14",
-    "eslint": "^9.15.0",
-    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^17.4.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.15.0"
+    "typescript-eslint": "^8.58.0"
   },
   "funding": [
     {

@@ -15,13 +15,16 @@ export async function wireApi<T>(
   const url = `${config.baseUrl}${endpoint}`;
   const accessToken = await config.getToken();
 
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
+  const isFormData = options.body instanceof FormData;
+  const headers = new Headers({
     ...config.headers,
     ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...options.headers,
-  };
-
+  });
+  if (!isFormData && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  
   try {
     const response = await fetch(url, { ...options, headers });
 
@@ -75,7 +78,7 @@ export async function wireApi<T>(
       return {
         status: transformed.status,
         message: transformed.message,
-        data: transformed.data
+        data: transformed.data,
       } as HttpResponse<T>;
     }
 
