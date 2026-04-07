@@ -1,6 +1,6 @@
 # fetchwire
 
-A lightweight, focused API fetching library for **React and React Native** applications.
+A lightweight, focused API fetching library for **React / React Native+** applications that use **React 19+**.
 
 **fetchwire** wraps the native `fetch` API in a global configuration layer. It is designed to make it easy to:
 
@@ -9,7 +9,7 @@ A lightweight, focused API fetching library for **React and React Native** appli
 
 ### When to use fetchwire
 
-- **React / React Native apps** that:
+- **React / React Native** that:
   - Want a **simple**, centralized way for API fetching setup.
   - Prefer plain hooks over a heavier state management or query library.
   - Need basic tag-based invalidation without a full cache layer.
@@ -37,7 +37,8 @@ If you find **fetchwire** helpful and want to support its development, you can b
   - Converts server/network errors into a typed `ApiError`.
 
 - **React hooks for data fetching and mutation with tag-based invalidation**
-  - **`useFetchFn`** for data fetching
+  - **`useFetch`** for **React 19+** new feature: Suspense-based data fetching (fetches on mount, suspends while loading)
+  - **`useFetchFn`** for manually triggered data fetching with explicit loading/error state
   - **`useMutationFn`** for mutations
   - With a simple, explicit way to refetch related data through tags
 
@@ -55,6 +56,7 @@ pnpm add fetchwire
 
 ### Peer expectations
 
+- Requires **React 19+** (the `useFetch` hook uses React's `use()` API).
 - TypeScript is recommended but not required.
 - For React Native / Expo, make sure the global `fetch` is available (default in modern RN/Expo).
 
@@ -130,7 +132,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
 );
 ```
 
-You **must** call `initWire` (directly or via a helper like `setupWire`) before using `wireApi`, `useFetchFn`, or `useMutationFn`.
+You **must** call `initWire` (directly or via a helper like `setupWire`) before using `wireApi`, `useFetch`, `useFetchFn`, or `useMutationFn`.
 
 ---
 
@@ -178,9 +180,59 @@ You can organize similar helpers for users, invoices, organizations, uploads, et
 
 ---
 
-### 2. Fetch data with `useFetchFn`
+### 2. Fetch data with `useFetch` (Suspense-based)
 
-`useFetchFn` is a generic hook that manages state for running an async function returning `HttpResponse<T>`, where `T` is **inferred** from your API helper.
+`useFetch` fetches immediately on mount and **suspends** the component while data is loading. The parent component tree must provide a `<Suspense>` boundary for the loading state and an `<ErrorBoundary>` for API errors.
+
+**Key ideas:**
+
+- The component suspends while the fetch is in flight — no `isLoading` flag needed.
+- API errors are thrown and caught by the nearest `<ErrorBoundary>`.
+- `fetchKey` uniquely identifies this fetch in the internal promise cache, preventing infinite suspend loops.
+- `refreshFetch` replaces the cached promise and re-suspends the component, showing the `<Suspense>` fallback again.
+
+```tsx
+// src/components/TodoList.tsx
+import { Suspense } from 'react';
+import { useFetch } from 'fetchwire';
+import { getTodosApi } from '../api/todo-api';
+
+// Parent: wrap with Suspense + ErrorBoundary
+export function TodoPage() {
+  return (
+    <ErrorBoundary fallback={<div>Something went wrong</div>}>
+      <Suspense fallback={<div>Loading...</div>}>
+        <TodoList />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
+function TodoList() {
+  const { data: todos, refreshFetch } = useFetch(getTodosApi, 'todos', {
+    tags: ['todos'],
+  });
+
+  return (
+    <div>
+      <button onClick={refreshFetch}>Refresh</button>
+      <ul>
+        {todos.map((todo) => (
+          <li key={todo.id}>
+            {todo.title} {todo.completed ? '(done)' : ''}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+---
+
+### 3. Fetch data with `useFetchFn` (manual trigger)
+
+`useFetchFn` is a generic hook that manages state for running an async function returning `HttpResponse<T>`, where `T` is **inferred** from your API helper. Unlike `useFetch`, you control when the fetch runs.
 
 **Key ideas:**
 
@@ -241,7 +293,7 @@ export function TodoList() {
 
 ---
 
-### 3. Mutate data with `useMutationFn`
+### 4. Mutate data with `useMutationFn`
 
 `useMutationFn` is a hook for mutations (create/update/delete). It:
 
@@ -326,13 +378,15 @@ export function TodoActions() {
 
 ---
 
-### 4. Tag-based invalidation and auto-refresh
+### 5. Tag-based invalidation and auto-refresh
 
 Tags provide a simple way to coordinate refetches across your app:
 
-- `useFetchFn(fetchFn, { tags: [...] })` subscribes the hook to one or more **tags**.
+- `useFetch(fetchFn, fetchKey, { tags: [...] })` and `useFetchFn(fetchFn, { tags: [...] })` subscribe to one or more **tags**.
 - `useMutationFn(mutationFn, { invalidatesTags: [...] })` emits those tags after a **successful** mutation.
-- When a tag is emitted, all subscribed fetch hooks will automatically **call `refreshFetchFn`**.
+- When a tag is emitted, all subscribed fetch hooks will automatically refresh:
+  - `useFetch` — calls `refreshFetch`, re-suspending the component and showing the `<Suspense>` fallback.
+  - `useFetchFn` — calls `refreshFetchFn` automatically.
 
 This pattern keeps your code explicit and small, without introducing a full query cache library.
 
@@ -392,7 +446,16 @@ All errors are normalized to an `ApiError` instance. It extends `Error` and typi
 
 ### Using ApiError in components
 
-With `useMutationFn`, you commonly handle errors with `onError`:
+**With `useFetch`** — errors are thrown and caught by the nearest `<ErrorBoundary>`. You do not handle them in the component itself.
+
+**With `useFetchFn`** — read the `error` field directly from the hook state:
+
+```tsx
+const { error } = useFetchFn(getTodosApi);
+if (error) return <div>Error: {error.message}</div>;
+```
+
+**With `useMutationFn`** — handle errors with `onError`:
 
 ```tsx
 import { ApiError } from 'fetchwire';
@@ -418,8 +481,6 @@ executeMutationFn(payload, {
 });
 ```
 
-You can also read `error` directly from `useFetchFn` state if you want to render error messages in your UI.
-
 ---
 
 ## API Reference
@@ -428,14 +489,14 @@ You can also read `error` directly from `useFetchFn` state if you want to render
 
 ```ts
 type WireInterceptors = {
-  onUnauthorized?: (error: ApiError) => void;
-  onForbidden?: (error: ApiError) => void;
-  onError?: (error: ApiError) => void;
+  onUnauthorized?: (error: ApiError) => void | Promise<void>;
+  onForbidden?: (error: ApiError) => void | Promise<void>;
+  onError?: (error: ApiError) => void | Promise<void>;
 };
 
 type WireConfig = {
   baseUrl: string;
-  headers?: Record<string, string>;
+  headers?: HeadersInit;
   getToken: () => Promise<string | null>;
   transformResponse?: (res: unknown) => { data?: unknown; message?: string; status?: number };
   interceptors?: WireInterceptors;
@@ -447,12 +508,12 @@ function initWire(config: WireConfig): void;
 ```
 
 - **`baseUrl`**: Base API URL (e.g. `'https://api.example.com'`).
-- **`headers`**: Global headers to apply to every request.
+- **`headers`**: Global headers applied to every request (`HeadersInit` — plain object, `Headers` instance, or array of `[name, value]` pairs). Merged before the computed `Authorization` header.
 - **`getToken`**: Async function called on each request; return the current access token or `null`. If a non-empty string is returned, fetchwire sends it as `Authorization: Bearer <token>`.
 - **`interceptors`** (optional):
-  - `onUnauthorized(error)`: Called when a 401 is returned.
-  - `onForbidden(error)`: Called when a 403 is returned.
-  - `onError(error)`: Called for other error statuses.
+  - `onUnauthorized(error)`: Called when a response matches `unauthorizedStatusCodes`. Can be async.
+  - `onForbidden(error)`: Called when a response matches `forbiddenStatusCodes`. Can be async.
+  - `onError(error)`: Called for other error statuses. Can be async.
 - **`transformResponse`** (optional): A function to normalize your API's response shape into fetchwire's standard `{ data?, message?, status? }` format. Useful when your backend uses a different envelope (e.g. `statusCode` instead of `status`). Called on every successful response before the data reaches your hooks.
 - **`unauthorizedStatusCodes`** (optional): List of HTTP status codes that should be treated as unauthorized (defaults to `[401]`).
 - **`forbiddenStatusCodes`** (optional): List of HTTP status codes that should be treated as forbidden (defaults to `[403]`).
@@ -486,7 +547,7 @@ function getWireConfig(): WireConfig;
 ```ts
 async function wireApi<T>(
   endpoint: string,
-  options?: RequestInit & { headers?: Record<string, string> }
+  options?: RequestInit
 ): Promise<HttpResponse<T>>;
 ```
 
@@ -502,6 +563,76 @@ const result = await wireApi<UserResponse>('/user/me', { method: 'GET' });
 // result.data is your typed data
 // result.message and result.status are available if your backend provides them
 ```
+
+---
+
+### `useFetch<T>(fetch, fetchKey, options?)`
+
+```ts
+type FetchOptions = {
+  tags?: string[];
+};
+
+function useFetch<T>(
+  fetch: () => Promise<HttpResponse<T>>,
+  fetchKey: string,
+  options?: FetchOptions
+): {
+  data: T | null;
+  refreshFetch: () => void;
+};
+```
+
+Fetches immediately on mount and **suspends** the component while data is loading. Requires a `<Suspense>` boundary for the loading state and an `<ErrorBoundary>` for API errors in the parent tree.
+
+- **`fetch`**: Async function (e.g. an API helper using `wireApi<T>`). Type `T` is inferred from its return type.
+- **`fetchKey`**: Unique string key for this fetch, used to cache the in-flight Promise and prevent infinite re-suspension on re-render.
+- **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetch` is called automatically, re-suspending the component.
+- **`data`**: The resolved value from the fetch. The component suspends until this is available.
+- **`refreshFetch()`**: Replaces the cached Promise with a fresh one. The component re-suspends and shows the nearest `<Suspense>` fallback.
+
+> **Note:** Tag strings must not contain commas.
+
+---
+
+### `promiseCacheMap`
+
+The shared singleton instance of `PromiseCacheMap` — the internal Promise cache that backs `useFetch`. It is exported for advanced use cases where you need to manage the cache directly.
+
+```ts
+class PromiseCacheMap {
+  get(key: string): Promise<unknown> | undefined;
+  set(key: string, promise: Promise<unknown>): void;
+  has(key: string): boolean;
+  delete(key: string): void;
+  clear(): void;
+}
+
+const promiseCacheMap: PromiseCacheMap;
+```
+
+**Common use cases:**
+
+- **Remove a specific entry** — the next render of `useFetch` with that key will start a cold fetch from scratch:
+
+  ```ts
+  import { promiseCacheMap } from 'fetchwire';
+
+  promiseCacheMap.delete('todos');
+  ```
+
+- **Clear everything on logout** — discard all cached Promises so no stale data is served after a new login:
+
+  ```ts
+  import { promiseCacheMap } from 'fetchwire';
+
+  function handleLogout() {
+    // ... clear auth token ...
+    promiseCacheMap.clear();
+  }
+  ```
+
+> **Note:** You typically do not need `promiseCacheMap` for day-to-day use. Tag-based invalidation via `useMutationFn` handles the common refetch case automatically. Reach for `promiseCacheMap` only when you need explicit, imperative control over the cache (e.g. logout flows, deep cache resets).
 
 ---
 
@@ -528,9 +659,11 @@ function useFetchFn<T>(
 
 - **`fetchFn`**: Async function (e.g. an API helper using `wireApi<T>`). Type `T` is inferred from its return type.
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetchFn` is called automatically.
-- **`executeFetchFn()`**: Runs `fetchFn` (no arguments). Updates `data`, `isLoading`, `error`.
-- **`refreshFetchFn()`**: Re-runs the same `fetchFn`, setting `isRefreshing` during the call.
+- **`executeFetchFn()`**: Runs `fetchFn`. Sets `isLoading: true` during the call; updates `data` and `error` on completion.
+- **`refreshFetchFn()`**: Re-runs the same `fetchFn`. Sets `isRefreshing: true` during the call (keeps existing `data` visible).
 - **`reset()`**: Resets `data`, `isLoading`, `isRefreshing`, and `error` back to their initial values.
+
+> **Note:** Tag strings must not contain commas.
 
 ---
 
@@ -544,8 +677,8 @@ type MutationOptions = {
 };
 
 type ExecuteMutationOptions<T> = {
-  onSuccess?: (data: T) => void;
-  onError?: (error: ApiError) => void;
+  onSuccess?: (data: T | null) => void | Promise<void>;
+  onError?: (error: ApiError) => void | Promise<void>;
 };
 
 // No variables: mutationFn has no parameters
@@ -577,12 +710,14 @@ function useMutationFn<T, TVariables>(
 ```
 
 - **`mutationFn`**: Async function that returns `Promise<HttpResponse<T>>`. If it takes one parameter, `executeMutationFn` will require that variable as the first argument.
-- **`options.invalidatesTags`**: Tags to emit after a **successful** mutation; subscribed `useFetchFn` hooks refresh.
+- **`options.invalidatesTags`**: Tags to emit after a **successful** mutation. All `useFetch` and `useFetchFn` hooks subscribed to any of these tags will refresh automatically.
 - **`executeMutationFn`**:
   - **No variables:** `executeMutationFn({ onSuccess, onError })`.
   - **With variables:** `executeMutationFn(variables, { onSuccess, onError })`.
   - Sets `isMutating` while running; on success updates `data`, emits tags, calls `onSuccess`; on error calls `onError`.
 - **`reset()`**: Resets `data` and `isMutating` to initial values.
+
+> **Note:** Tag strings must not contain commas.
 
 ---
 

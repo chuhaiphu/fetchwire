@@ -92,7 +92,7 @@ export interface WireConfig {
 }
 
 /**
- * Options for the `useFetchFn` hook.
+ * Options for the `useFetch` and `useFetchFn` hooks.
  */
 export interface FetchOptions {
   /**

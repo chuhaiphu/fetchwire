@@ -1,5 +1,54 @@
 # Changelog
 
+## [3.0.0] - 2026-04-07
+
+### Added
+
+- **`useFetch` — Suspense-based data fetching hook**
+  A new hook that fetches immediately on mount and suspends the component while data is loading.
+  Uses React 19's `use()` API under the hood. The parent component tree must provide a `<Suspense>` boundary for the loading state and an `<ErrorBoundary>` for API errors.
+
+  ```tsx
+  // Parent
+  <ErrorBoundary fallback={<div>Error</div>}>
+    <Suspense fallback={<div>Loading…</div>}>
+      <TodoList />
+    </Suspense>
+  </ErrorBoundary>
+
+  // TodoList component
+  function TodoList() {
+    const { data: todos, refreshFetch } = useFetch(getTodosApi, 'todos', {
+      tags: ['todos'],
+    });
+
+    return <ul>{todos.map(t => <li key={t.id}>{t.title}</li>)}</ul>;
+  }
+  ```
+
+  - `fetchKey` — a unique string key used to cache the in-flight Promise and prevent the infinite suspend loop that would otherwise occur when React re-renders during suspension.
+  - `refreshFetch` — replaces the cached Promise with a fresh one, causing the component to re-suspend and show the nearest `<Suspense>` fallback.
+  - Supports tag-based invalidation via `options.tags` — the same mechanism used by `useFetchFn`.
+
+- **`promiseCacheMap` singleton**
+  The `Map`-backed promise cache used by `useFetch` is now exported as `promiseCacheMap`. Use it for advanced cache management — removing a specific entry to force a cold refetch, or calling `promiseCacheMap.clear()` to discard all cached Promises on logout.
+
+  ```ts
+  import { promiseCacheMap } from 'fetchwire';
+
+  // Force a cold refetch for a single key
+  promiseCacheMap.delete('todos');
+
+  // Discard all entries on logout
+  promiseCacheMap.clear();
+  ```
+
+### Documentation
+
+- `FetchOptions` JSDoc updated to reflect that the interface is shared by both `useFetch` and `useFetchFn`.
+
+---
+
 ## [2.3.1] - 2026-04-06
 
 ### Fixed
