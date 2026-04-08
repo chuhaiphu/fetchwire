@@ -1,4 +1,4 @@
-import { useEffect, useCallback, use, useState } from 'react';
+import { useEffect, useCallback, use, useState, useTransition } from 'react';
 import { HttpResponse, FetchOptions } from '../interface';
 import { eventEmitter } from '../core/event-emitter';
 import { promiseCacheMap } from '../core/promise-cache-map';
@@ -40,6 +40,7 @@ export function useFetch<T>(
 ): {
   data: T | null;
   refreshFetch: () => void;
+  isRefreshing: boolean;
 } {
   // Why if we don't cache the promise?
   // 1. Each time the Component is rendered, a new Pending Promise from fetch is created
@@ -63,12 +64,16 @@ export function useFetch<T>(
     () => promiseCacheMap.get(fetchKey) as Promise<T>
   );
 
+  const [isPending, startTransition] = useTransition();
+
   // Replaces the current Promise with a new one.
   // use() will see the new Promise and re-suspend the component, showing the <Suspense> fallback.
   const refreshFetch = useCallback(() => {
     const newPromise = fetch().then((res) => extractHttpResponseData(res));
     promiseCacheMap.set(fetchKey, newPromise);
-    setPromise(newPromise);
+    startTransition(() => {
+      setPromise(newPromise);
+    });
   }, [fetch, fetchKey]);
 
   // Each time the consumer component renders, a brand new options object is created,
@@ -92,5 +97,5 @@ export function useFetch<T>(
     throw new Error('Undefined data');
   }
 
-  return { data, refreshFetch };
+  return { data, refreshFetch, isRefreshing: isPending };
 }

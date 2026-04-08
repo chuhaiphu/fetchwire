@@ -6,3 +6,4 @@ export * from './hook/use-fetch-fn';
 export * from './hook/use-mutation-fn';
 export * from './hook/use-fetch';
 export * from './core/promise-cache-map';
+export * from './core/prefetch';

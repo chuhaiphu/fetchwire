@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { ApiError } from '../util/api-error';
 import { HttpResponse, FetchOptions } from '../interface';
 import { eventEmitter } from '../core/event-emitter';
+import { promiseCacheMap } from '../core/promise-cache-map';
+import { extractHttpResponseData } from '../util/helper';
 
 interface FetchState<T> {
   data: T | null;
@@ -45,16 +47,36 @@ export function useFetchFn<T>(
     };
   }, []);
 
+  // Because useCallback only return the same reference of execute() function,
+  // And because useRef only get the new fetchFn reference at the first render,
+  // On the next renders, useRef will return the same fetchFn reference,
+  // We need to update the fetchFn reference manually each time the fetchFn changes,
+  // So that the execute() function can always get the latest fetchFn reference when it runs.
   useEffect(() => {
     fetchFnRef.current = fetchFn;
   }, [fetchFn]);
 
+  // Create only one reference for the execute function with useCallback,
+  // So that the executeFetchFn and refreshFetchFn below can be memoized
+  // In return won't cause unnecessary re-renders in the consumer component.
+  // ---
+  // If not use useCallback here,
+  // In case the consumer component put executeFetchFn or refreshFetchFn in the dependency array of their useEffect,
+  // E.g useEffect(() => { executeFetchFn }, [executeFetchFn]), which is a must to use useFetchFn,
+  // This is the consequence:
+  // 1. Each time the Component is rendered, a new execute function is created
+  // 2. The useEffect in the consumer component will be triggered because executeFetchFn reference changed
+  // 3. executeFetchFn will run, which will call this new execute function reference
+  // 4. Then it will trigger a new fetch and update the state.
+  // 5. The component will re-render because the state is updated.
+  // 6. Repeat from step 1, which creates an infinite loop of fetches and re-renders.
+  const fetchKey = options?.fetchKey;
   const execute = useCallback(
     async (execOptions: {
       isRefresh: boolean;
-    }): Promise<HttpResponse<T> | null> => {
+    }): Promise<T | null> => {
+      // Get the latest fetchFn reference from the ref, which is updated by the useEffect above each time the fetchFn changes.
       const fn = fetchFnRef.current;
-
       setState((prev) => ({
         ...prev,
         isLoading: !execOptions.isRefresh,
@@ -63,17 +85,30 @@ export function useFetchFn<T>(
       }));
 
       try {
-        const response = await fn();
+        let data: T;
+        if (!execOptions.isRefresh && fetchKey && promiseCacheMap.has(fetchKey)) {
+          // Get the Promise cache function from the fetchKey that prefetch() have set
+          // So do not have to perform fetching again
+          data = await promiseCacheMap.get(fetchKey) as T;
+        } else {
+          const rawPromise = fn().then((res) => extractHttpResponseData(res));
+          // Set the promise right away so if there is any fetch with the same fetchKey, 
+          // it will be served with promise from cacheMap instead of create a brand new promise.
+          if (fetchKey) {
+            promiseCacheMap.set(fetchKey, rawPromise);
+          }
+          data = await rawPromise;
+        }
 
         if (isMounted.current) {
           setState({
-            data: response.data ?? null,
+            data: data ?? null,
             isLoading: false,
             isRefreshing: false,
             error: null,
           });
         }
-        return response;
+        return data;
       } catch (error) {
         const apiError = error as ApiError;
         if (isMounted.current) {
@@ -87,7 +122,7 @@ export function useFetchFn<T>(
         return null;
       }
     },
-    []
+    [fetchKey]
   );
 
   const executeFetchFn = useCallback(
@@ -100,7 +135,8 @@ export function useFetchFn<T>(
     setState({ data: null, isLoading: false, isRefreshing: false, error: null });
   }, []);
 
-  // Each time the consumer component renders, a brand new options object is created,
+  // Because options.tags is an array,
+  // Each time the consumer component renders, a brand new array is created,
   // Which would cause the useEffect to re-run, even if the tags are the same.
   // So we need to create a string key for it by stringifying from options.tags.
   // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.

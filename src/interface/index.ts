@@ -109,6 +109,7 @@ export interface FetchOptions {
    * tags: ['todo,list']           // ✗ invalid — comma will break tag matching
    */
   tags?: string[];
+  fetchKey?: string;
 }
 
 /**
