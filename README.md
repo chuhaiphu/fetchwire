@@ -6,6 +6,8 @@ A lightweight, focused API fetching library for **React / React Native+** applic
 
 - Centralize your API base URL, auth token, and common headers.
 - Handle errors consistently.
+- Deliver a smooth, non-blocking data-fetching experience. 
+- Eliminating loading waterfalls and making the UI feel instant.
 
 ## Version note
 
