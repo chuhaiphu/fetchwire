@@ -1,5 +1,75 @@
 # Changelog
 
+## [3.2.0] - 2026-04-09
+
+### Added
+
+- **`prefetch(fetchKey, fetchFn)` — pre-fetch data before a component mounts**
+  Populates `promiseCacheMap` ahead of time so that `useFetch` or `useFetchFn` (with matching `fetchKey`) can resolve instantly without a redundant network request.
+
+  ```ts
+  import { prefetch } from 'fetchwire';
+
+  // In a route loader, event handler, or anywhere before the component renders
+  prefetch('todos', () => getTodosApi());
+  ```
+
+  - Accepts `() => Promise<HttpResponse<T> | T>` — same flexibility as `useFetch`.
+  - If the key already exists in the cache, the existing Promise is returned (no duplicate fetch).
+  - Works with `useFetch` (same `fetchKey`) and `useFetchFn` (via `options.fetchKey`).
+
+- **`onRequest` interceptor in `WireInterceptors`**
+  A new interceptor called before every `fetch()` with the final `RequestInit` object. Use it to add dynamic headers, inject tracing IDs, log outgoing requests, or perform any pre-request side effect.
+
+  ```ts
+  initWire({
+    // ...
+    interceptors: {
+      onRequest: (requestInit) => {
+        requestInit.headers.set('x-request-id', crypto.randomUUID());
+      },
+    },
+  });
+  ```
+
+  Internally, `wireApi` now builds a single shared `RequestInit` object before calling `onRequest` and `fetch`, so mutations inside the interceptor are reflected in the actual request.
+
+- **`useFetch` now uses `useTransition` for non-blocking refresh**
+  `refreshFetch()` is wrapped in `startTransition`, so React keeps the current UI visible while the new data loads instead of immediately re-suspending and showing the `<Suspense>` fallback.
+
+  The hook now returns an additional `isRefreshing: boolean` field (powered by `useTransition`'s `isPending`) to let you show inline loading indicators without losing the existing content.
+
+  ```tsx
+  const { data, refreshFetch, isRefreshing } = useFetch(getTodosApi, 'todos');
+  ```
+
+- **`fetchKey` option in `FetchOptions`**
+  `FetchOptions` now accepts an optional `fetchKey` string. When provided to `useFetchFn`, the hook integrates with `promiseCacheMap`:
+  - On the first `executeFetchFn()` call, it checks the cache for a prefetched Promise (set by `prefetch()`), avoiding a duplicate request.
+  - On every fetch, the Promise is stored in the cache under `fetchKey`, enabling deduplication if multiple hooks share the same key.
+
+### Breaking Changes
+
+- **`useFetchFn`: `executeFetchFn` and `refreshFetchFn` now return `Promise<T | null>`**
+
+  ```ts
+  // Before (3.1)
+  const response = await executeFetchFn(); // HttpResponse<Todo[]> | null
+  const todos = response?.data;
+
+  // After (3.2.0)
+  const todos = await executeFetchFn(); // Todo[] | null
+  ```
+
+### Documentation
+
+- Updated README: added `prefetch` usage section and API reference.
+- Updated README: `WireInterceptors` type and `initWire` example now include `onRequest`.
+- Updated README: `useFetch` return type and description reflect `isRefreshing` and Transition behavior.
+- Updated README: `useFetchFn` return types corrected to `Promise<T | null>`, `fetchKey` documented in `FetchOptions`.
+
+---
+
 ## [3.1] - 2026-04-07
 
 ### Added

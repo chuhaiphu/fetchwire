@@ -20,6 +20,13 @@ export interface HttpResponse<T> {
  */
 export interface WireInterceptors {
   /**
+   * Called before sending the request, with the final `RequestInit` object.
+   *
+   * This allows you to modify the request (e.g. add custom headers) or perform
+   * side effects before the request is sent.
+   */
+  onRequest?: (options: RequestInit) => void | Promise<void>;
+  /**
    * Called when a 401 Unauthorized response is returned.
    */
   onUnauthorized?: (error: ApiError) => void | Promise<void>;

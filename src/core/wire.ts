@@ -24,9 +24,22 @@ export async function wireApi<T>(
   if (!isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  
+
+  // Build the final RequestInit object to allow interceptors to modify it before the request is sent.
+  // ---
+  // If we pass original ({...options, headers}) directly to function onRequest, fetch, etc.,
+  // A brand new RequestInit object will be created each time we spread options, 
+  // Thus make any modification in the interceptor (e.g. adding a header) not work as expected because the modified RequestInit object is not used in the fetch function.
+  const finalRequestConfig: RequestInit = {
+    ...options,
+    headers,
+  };
+
   try {
-    const response = await fetch(url, { ...options, headers });
+    if (config.interceptors?.onRequest) {
+      await config.interceptors.onRequest(finalRequestConfig);
+    }
+    const response = await fetch(url, finalRequestConfig);
 
     if (!response.ok) {
       let errorData;
