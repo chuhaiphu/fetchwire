@@ -28,7 +28,7 @@ export async function wireApi<T>(
   // Build the final RequestInit object to allow interceptors to modify it before the request is sent.
   // ---
   // If we pass original ({...options, headers}) directly to function onRequest, fetch, etc.,
-  // A brand new RequestInit object will be created each time we spread options, 
+  // A brand new RequestInit object will be created each time we spread options,
   // Thus make any modification in the interceptor (e.g. adding a header) not work as expected because the modified RequestInit object is not used in the fetch function.
   const finalRequestConfig: RequestInit = {
     ...options,
@@ -46,18 +46,30 @@ export async function wireApi<T>(
     }
 
     if (!response.ok) {
-      let errorData;
+      let errorResponseJson;
       try {
-        errorData = await response.json();
+        errorResponseJson = await response.json();
       } catch {
-        errorData = { message: 'Unknown server error', error: 'UNKNOWN' };
+        errorResponseJson = { message: 'Unknown server error', error: 'UNKNOWN' };
       }
 
-      const apiError = new ApiError(
-        errorData.message,
-        errorData.error,
-        response.status
-      );
+      let apiError: ApiError;
+
+      if (config.transformError) {
+        // Preserve the ApiError instance returned by transformError.
+        apiError = config.transformError(errorResponseJson);
+        if (apiError.statusCode == null) {
+          apiError.statusCode = response.status;
+        }
+      } else {
+        apiError = new ApiError(
+          errorResponseJson.message,
+          errorResponseJson.error,
+          errorResponseJson.statusCode ??
+            errorResponseJson.status ??
+            response.status
+        );
+      }
 
       // Resolve effective status-code mappings with default values
       const unauthorizedStatusCodes =
@@ -83,22 +95,17 @@ export async function wireApi<T>(
       throw apiError;
     }
 
-    const result = await response.json();
+    const textResponse = await response.text();
+    // If the response has no content, return an empty object to avoid JSON parsing errors.
+    const jsonResponse = textResponse ? JSON.parse(textResponse) : {};
     if (config.transformResponse) {
-      const transformed = config.transformResponse(result);
-
-      return {
-        status: transformed.status,
-        message: transformed.message,
-        data: transformed.data,
-      } as HttpResponse<T>;
+      return config.transformResponse(jsonResponse) as HttpResponse<T>;
     }
 
-    // if the transformResponse is not provided
     return {
-      data: result.data !== undefined ? result.data : result,
-      status: result.status || result.statusCode || response.status,
-      message: result.message || '',
+      data: jsonResponse.data ?? jsonResponse,
+      status: jsonResponse.status ?? jsonResponse.statusCode ?? response.status,
+      message: jsonResponse.message ?? '',
     };
   } catch (error) {
     if (error instanceof ApiError) throw error;

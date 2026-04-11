@@ -6,7 +6,7 @@ A lightweight, focused API fetching library for **React / React Native+** applic
 
 - Centralize your API base URL, auth token, and common headers.
 - Handle errors consistently.
-- Deliver a smooth, non-blocking data-fetching experience. 
+- Deliver a smooth, non-blocking data-fetching experience.
 - Eliminating loading waterfalls and making the UI feel instant.
 
 ## Version note
@@ -44,6 +44,7 @@ If you find **fetchwire** helpful and want to support its development, you can b
   - Optionally register global interceptors for 401/403/other errors.
   - `onRequest` interceptor — called before every request with the full URL and `RequestInit`.
   - `onResponse` interceptor — called after every response, before the body is parsed.
+  - Optional `transformError` function to normalize server error payloads into `ApiError`.
   - Optional `transformResponse` function to normalize incoming API responses.
   - Converts server/network errors into a typed `ApiError`.
 
@@ -86,7 +87,7 @@ Call `initWire` once, as early as possible in your app lifecycle.
 
 ```ts
 // src/api/wire.ts
-import { initWire } from 'fetchwire';
+import { ApiError, initWire } from 'fetchwire';
 
 export function setupWire() {
   initWire({
@@ -111,6 +112,21 @@ export function setupWire() {
         data: rawResponse.data,
         message: rawResponse.message || '',
       };
+    },
+    // Optional: transform error response
+    transformError(error) {
+      const rawError = error as {
+        message?: string;
+        error?: string;
+        code?: string;
+        statusCode?: number;
+        status?: number;
+      };
+      return new ApiError(
+        rawError.message ?? 'Unknown server error',
+        rawError.error ?? rawError.code ?? 'UNKNOWN',
+        rawError.statusCode ?? rawError.status
+      );
     },
     // Optional: customize which status codes should trigger auth interceptors
     unauthorizedStatusCodes: [401, 419], // defaults to [401] if omitted
@@ -242,7 +258,11 @@ export function TodoPage() {
 }
 
 function TodoList() {
-  const { data: todos, refreshFetch, isRefreshing } = useFetch(getTodosApi, 'todos', {
+  const {
+    data: todos,
+    refreshFetch,
+    isRefreshing,
+  } = useFetch(getTodosApi, 'todos', {
     tags: ['todos'],
   });
 
@@ -564,6 +584,7 @@ type WireConfig = {
   baseUrl: string;
   headers?: HeadersInit;
   getToken: () => Promise<string | null>;
+  transformError?: (error: unknown) => ApiError;
   transformResponse?: (res: unknown) => {
     data?: unknown;
     message?: string;
@@ -586,6 +607,7 @@ function initWire(config: WireConfig): void;
   - `onUnauthorized(error)`: Called when a response matches `unauthorizedStatusCodes`. Fires before `onError` (cascade — `onError` also fires). Can be async.
   - `onForbidden(error)`: Called when a response matches `forbiddenStatusCodes`. Fires before `onError` (cascade — `onError` also fires). Can be async.
   - `onError(error)`: Called for **every** non-OK response, including 401 and 403. Use as a global error sink (e.g. show a toast). Can be async.
+- **`transformError`** (optional): A function to normalize your backend error payload into an `ApiError` (`message`, `errorCode`, `statusCode`). Called on non-OK responses before interceptors (`onUnauthorized`, `onForbidden`, `onError`) are executed.
 - **`transformResponse`** (optional): A function to normalize your API's response shape into fetchwire's standard `{ data?, message?, status? }` format. Useful when your backend uses a different envelope (e.g. `statusCode` instead of `status`). Called on every successful response before the data reaches your hooks.
 - **`unauthorizedStatusCodes`** (optional): List of HTTP status codes that should be treated as unauthorized (defaults to `[401]`).
 - **`forbiddenStatusCodes`** (optional): List of HTTP status codes that should be treated as forbidden (defaults to `[403]`).

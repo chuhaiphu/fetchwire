@@ -102,11 +102,17 @@ export interface WireConfig {
   getToken: () => Promise<string | null>;
 
   /**
+   * Optional function to transform the raw Error response from the server into the
+   * standardized `ApiError` shape.
+   *
+   * If not provided, fetchwire will assume the error response has the standard structure
+   * 
+   * `{ message: string, error: string, statusCode: number }`.
+   */
+  transformError?: (error: unknown) => ApiError;
+  /**
    * Optional function to transform the raw JSON response from the server into the
    * standardized `HttpResponse` shape.
-   *
-   * This is useful if your API responses have a different structure and you want
-   * to normalize them for easier consumption in your app.
    *
    * If not provided, fetchwire will assume the raw JSON to "data" attribute in the HttpResponse`.
    */

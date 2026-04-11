@@ -55,7 +55,11 @@ export function useFetch<T>(
   if (!promiseCacheMap.has(fetchKey)) {
     promiseCacheMap.set(
       fetchKey,
-      fetch().then((res) => extractHttpResponseData(res))
+      fetch().then((res) => extractHttpResponseData(res)).catch((error) => {
+        // Remove the rejected promise from cache to allow retry in next fetch.
+        promiseCacheMap.delete(fetchKey);
+        throw error;
+      })
     );
   }
 

@@ -4,6 +4,35 @@
 
 ### Added
 
+- **`transformError` in `WireConfig`**
+  A new optional transformer to normalize backend error payloads into `ApiError` before interceptors run and before `wireApi` throws.
+
+  Runtime behavior:
+  - If `transformError` returns an `ApiError`, fetchwire now preserves that instance (including stack and custom properties).
+  - If `statusCode` is missing from the transformed error, fetchwire falls back to the HTTP `response.status`.
+
+  ```ts
+  import { ApiError, initWire } from 'fetchwire';
+
+  initWire({
+    transformError: (error) => {
+      const rawError = error as {
+        message?: string;
+        error?: string;
+        code?: string;
+        statusCode?: number;
+        status?: number;
+      };
+
+      return new ApiError(
+        rawError.message ?? 'Unknown server error',
+        rawError.error ?? rawError.code ?? 'UNKNOWN',
+        rawError.statusCode ?? rawError.status
+      );
+    },
+  });
+  ```
+
 - **`onResponse` interceptor in `WireInterceptors`**
   A new interceptor called after every `fetch()`, before the response body is parsed.
   Use it to log response metadata, record timing, or inspect response headers.
@@ -60,12 +89,12 @@
   // Before
   onRequest: (requestInit) => {
     requestInit.headers.set('x-request-id', crypto.randomUUID());
-  }
+  };
 
   // After
   onRequest: (url, requestInit) => {
     requestInit.headers.set('x-request-id', crypto.randomUUID());
-  }
+  };
   ```
 
 - **`onError` now fires for 401/403 in addition to specific handlers**
@@ -75,11 +104,12 @@
   onError: (error) => {
     if (error.statusCode === 401 || error.statusCode === 403) return;
     showToast(error.message);
-  }
+  };
   ```
 
 ### Documentation
 
+- Updated README: added `transformError` to `initWire` example and API reference.
 - Updated README: `WireInterceptors` type and `initWire` example now include `onResponse` and updated `onRequest` signature.
 - Updated README: `onUnauthorized`, `onForbidden`, and `onError` descriptions reflect cascade behavior.
 
