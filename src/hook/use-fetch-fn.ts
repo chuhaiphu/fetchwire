@@ -72,9 +72,7 @@ export function useFetchFn<T>(
   // 6. Repeat from step 1, which creates an infinite loop of fetches and re-renders.
   const fetchKey = options?.fetchKey;
   const execute = useCallback(
-    async (execOptions: {
-      isRefresh: boolean;
-    }): Promise<T | null> => {
+    async (execOptions: { isRefresh: boolean }): Promise<T | null> => {
       // Get the latest fetchFn reference from the ref, which is updated by the useEffect above each time the fetchFn changes.
       const fn = fetchFnRef.current;
       setState((prev) => ({
@@ -89,10 +87,10 @@ export function useFetchFn<T>(
         if (!execOptions.isRefresh && fetchKey && promiseCacheMap.has(fetchKey)) {
           // Get the Promise cache function from the fetchKey that prefetch() have set
           // So do not have to perform fetching again
-          data = await promiseCacheMap.get(fetchKey) as T;
+          data = (await promiseCacheMap.get(fetchKey)) as T;
         } else {
           const rawPromise = fn().then((res) => extractHttpResponseData(res));
-          // Set the promise right away so if there is any fetch with the same fetchKey, 
+          // Set the promise right away so if there is any fetch with the same fetchKey,
           // it will be served with promise from cacheMap instead of create a brand new promise.
           if (fetchKey) {
             promiseCacheMap.set(fetchKey, rawPromise);

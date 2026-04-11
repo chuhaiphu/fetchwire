@@ -42,7 +42,8 @@ If you find **fetchwire** helpful and want to support its development, you can b
 - **Global API fetching configuration `initWire`**
   - Configure `baseUrl`, default headers, and how to read the auth token.
   - Optionally register global interceptors for 401/403/other errors.
-  - `onRequest` interceptor to modify the request before it is sent.
+  - `onRequest` interceptor — called before every request with the full URL and `RequestInit`.
+  - `onResponse` interceptor — called after every response, before the body is parsed.
   - Optional `transformResponse` function to normalize incoming API responses.
   - Converts server/network errors into a typed `ApiError`.
 
@@ -115,18 +116,31 @@ export function setupWire() {
     unauthorizedStatusCodes: [401, 419], // defaults to [401] if omitted
     forbiddenStatusCodes: [403], // defaults to [403] if omitted
     interceptors: {
-      onRequest: (requestInit) => {
-        // e.g. add a request ID header before every request
+      onRequest: (url, requestInit) => {
+        // Called before every request.
+        // url is the full URL (baseUrl + endpoint), e.g. "https://api.example.com/todos"
+        // Mutations to requestInit are reflected in the actual request.
+        console.log(`→ ${requestInit.method ?? 'GET'} ${url}`);
         requestInit.headers.set('x-request-id', crypto.randomUUID());
       },
+      onResponse: (url, response) => {
+        // Called after every response, before the body is parsed.
+        // Do not call response.json() / response.text() here — use response.clone() if needed.
+        console.log(`← ${response.status} ${url}`);
+      },
       onUnauthorized: (error) => {
-        // e.g. redirect to login, clear token, show toast, etc.
+        // Called when response status matches unauthorizedStatusCodes (default: 401).
+        // onError will also fire after this (cascade behavior).
+        // e.g. redirect to login, clear token, etc.
       },
       onForbidden: (error) => {
+        // Called when response status matches forbiddenStatusCodes (default: 403).
+        // onError will also fire after this (cascade behavior).
         // e.g. show "no permission" message
       },
       onError: (error) => {
-        // fallback handler for other error statuses
+        // Called for EVERY non-OK response, including 401 and 403.
+        // e.g. show a global toast notification
       },
     },
   });
@@ -539,7 +553,8 @@ executeMutationFn(payload, {
 
 ```ts
 type WireInterceptors = {
-  onRequest?: (options: RequestInit) => void | Promise<void>;
+  onRequest?: (url: string, options: RequestInit) => void | Promise<void>;
+  onResponse?: (url: string, response: Response) => void | Promise<void>;
   onUnauthorized?: (error: ApiError) => void | Promise<void>;
   onForbidden?: (error: ApiError) => void | Promise<void>;
   onError?: (error: ApiError) => void | Promise<void>;
@@ -566,10 +581,11 @@ function initWire(config: WireConfig): void;
 - **`headers`**: Global headers applied to every request (`HeadersInit` — plain object, `Headers` instance, or array of `[name, value]` pairs). Merged before the computed `Authorization` header.
 - **`getToken`**: Async function called on each request; return the current access token or `null`. If a non-empty string is returned, fetchwire sends it as `Authorization: Bearer <token>`.
 - **`interceptors`** (optional):
-  - `onRequest(options)`: Called before every request with the final `RequestInit`. Modify headers, inject tracing IDs, or perform pre-request side effects. Can be async.
-  - `onUnauthorized(error)`: Called when a response matches `unauthorizedStatusCodes`. Can be async.
-  - `onForbidden(error)`: Called when a response matches `forbiddenStatusCodes`. Can be async.
-  - `onError(error)`: Called for other error statuses. Can be async.
+  - `onRequest(url, options)`: Called before every request with the full URL and final `RequestInit`. Modify headers, inject tracing IDs, or log outgoing requests. Can be async.
+  - `onResponse(url, response)`: Called after every response, before the body is parsed. Use for logging, timing, or header inspection. Do not consume the response body — use `response.clone()` if needed. Can be async.
+  - `onUnauthorized(error)`: Called when a response matches `unauthorizedStatusCodes`. Fires before `onError` (cascade — `onError` also fires). Can be async.
+  - `onForbidden(error)`: Called when a response matches `forbiddenStatusCodes`. Fires before `onError` (cascade — `onError` also fires). Can be async.
+  - `onError(error)`: Called for **every** non-OK response, including 401 and 403. Use as a global error sink (e.g. show a toast). Can be async.
 - **`transformResponse`** (optional): A function to normalize your API's response shape into fetchwire's standard `{ data?, message?, status? }` format. Useful when your backend uses a different envelope (e.g. `statusCode` instead of `status`). Called on every successful response before the data reaches your hooks.
 - **`unauthorizedStatusCodes`** (optional): List of HTTP status codes that should be treated as unauthorized (defaults to `[401]`).
 - **`forbiddenStatusCodes`** (optional): List of HTTP status codes that should be treated as forbidden (defaults to `[403]`).

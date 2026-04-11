@@ -25,11 +25,24 @@ export const updateWireConfig = (config: Partial<WireConfig>): void => {
   }
 
   globalWireConfig = {
+    // Copy existing initial config
     ...globalWireConfig,
+    // Add new config values,
+    // overriding existing ones if duplicated
     ...config,
     headers: {
+      // Copy existing headers
       ...globalWireConfig.headers,
+      // Add new header values,
+      // overriding existing ones if duplicated
       ...config.headers,
+    },
+    interceptors: {
+      // Copy existing interceptors
+      ...globalWireConfig.interceptors,
+      // Add new interceptor values,
+      // overriding existing ones if duplicated
+      ...config.interceptors,
     },
   };
 };

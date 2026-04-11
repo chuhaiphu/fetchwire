@@ -14,30 +14,62 @@ export interface HttpResponse<T> {
 }
 
 /**
- * Set of optional global interceptors that can react to HTTP errors.
+ * Set of optional global interceptors that can react to HTTP lifecycle events.
  *
  * All handlers can be synchronous or async.
  */
 export interface WireInterceptors {
   /**
-   * Called before sending the request, with the final `RequestInit` object.
+   * Called before every request, with the full URL and the final `RequestInit` object.
    *
-   * This allows you to modify the request (e.g. add custom headers) or perform
-   * side effects before the request is sent.
+   * Use this to add dynamic headers, inject trace IDs, or log outgoing requests.
+   * Mutations to `options` (e.g. `options.headers.set(...)`) are reflected in the
+   * actual request because both this interceptor and `fetch` share the same object.
+   *
+   * @param url     The full URL that will be fetched (baseUrl + endpoint).
+   * @param options The final `RequestInit` object, including merged headers and auth token.
    */
-  onRequest?: (options: RequestInit) => void | Promise<void>;
+  onRequest?: (url: string, options: RequestInit) => void | Promise<void>;
+
   /**
-   * Called when a 401 Unauthorized response is returned.
+   * Called after every response, before the body is parsed.
+   *
+   * Use this to log response metadata, inspect headers, or record timing.
+   *
+   * **Do not consume the response body** (e.g. do not call `response.json()` or
+   * `response.text()`) — doing so will exhaust the body stream, causing the
+   * subsequent read inside `wireApi` to fail. Use `response.clone()` if you
+   * need to read the body here.
+   *
+   * @param url      The full URL of the completed request.
+   * @param response The raw `Response` object returned by `fetch`.
+   */
+  onResponse?: (url: string, response: Response) => void | Promise<void>;
+
+  /**
+   * Called when a response matches `unauthorizedStatusCodes` (default: 401).
+   *
+   * Fires **before** `onError`. After this handler completes, `onError` will
+   * also fire (cascade behavior) — useful when you want both specific auth
+   * handling and a global error notification.
    */
   onUnauthorized?: (error: ApiError) => void | Promise<void>;
 
   /**
-   * Called when a 403 Forbidden response is returned.
+   * Called when a response matches `forbiddenStatusCodes` (default: 403).
+   *
+   * Fires **before** `onError`. After this handler completes, `onError` will
+   * also fire (cascade behavior) — useful when you want both specific permission
+   * handling and a global error notification.
    */
   onForbidden?: (error: ApiError) => void | Promise<void>;
 
   /**
-   * Called for other non‑success errors, after more specific handlers (if any).
+   * Called for **every** non-OK response, including those already handled by
+   * `onUnauthorized` or `onForbidden` (cascade behavior).
+   *
+   * Use this as a global error sink — e.g. to show a toast notification for
+   * all API errors regardless of their specific status code.
    */
   onError?: (error: ApiError) => void | Promise<void>;
 }

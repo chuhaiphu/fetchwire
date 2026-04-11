@@ -1,5 +1,90 @@
 # Changelog
 
+## [3.3.0] - 2026-04-11
+
+### Added
+
+- **`onResponse` interceptor in `WireInterceptors`**
+  A new interceptor called after every `fetch()`, before the response body is parsed.
+  Use it to log response metadata, record timing, or inspect response headers.
+
+  ```ts
+  initWire({
+    interceptors: {
+      onResponse: (url, response) => {
+        console.log(`← ${response.status} ${url}`);
+      },
+    },
+  });
+  ```
+
+  **Important:** Do not consume the response body inside `onResponse` (i.e. avoid `response.json()` or `response.text()`). Doing so exhausts the body stream, which will cause the subsequent read inside `wireApi` to fail. Use `response.clone()` if you need to read the body.
+
+### Changed
+
+- **`onError` now uses cascade behavior**
+  Previously, `onError` was only called when no specific handler (`onUnauthorized` / `onForbidden`) was registered or matched. Now, `onError` fires for **every** non-OK response — after `onUnauthorized` or `onForbidden` when applicable.
+
+  ```ts
+  // Before (3.2 — exclusive/waterfall):
+  // 401 → onUnauthorized fires, onError does NOT fire
+  // 403 → onForbidden fires, onError does NOT fire
+  // 5xx → onError fires
+
+  // After (3.3 — cascade):
+  // 401 → onUnauthorized fires, then onError fires
+  // 403 → onForbidden fires, then onError fires
+  // 5xx → onError fires
+  ```
+
+  This makes it possible to combine specific handlers (e.g. redirect to login on 401) with a global error sink (e.g. show a toast for all API errors), without duplicating logic.
+
+- **All interceptors are now properly `await`ed**
+  Error interceptors (`onUnauthorized`, `onForbidden`, `onError`) were previously called without `await`, meaning async handlers were not awaited before `wireApi` threw the error. All interceptors now consistently `await` their handlers.
+
+### Breaking Changes
+
+- **`onRequest` signature: `url` added as first parameter**
+
+  ```ts
+  // Before (3.2):
+  onRequest?: (options: RequestInit) => void | Promise<void>;
+
+  // After (3.3):
+  onRequest?: (url: string, options: RequestInit) => void | Promise<void>;
+  ```
+
+  **Migration:** add `url` as the first parameter in any existing `onRequest` handler.
+
+  ```ts
+  // Before
+  onRequest: (requestInit) => {
+    requestInit.headers.set('x-request-id', crypto.randomUUID());
+  }
+
+  // After
+  onRequest: (url, requestInit) => {
+    requestInit.headers.set('x-request-id', crypto.randomUUID());
+  }
+  ```
+
+- **`onError` now fires for 401/403 in addition to specific handlers**
+  If your existing `onError` was intentionally meant to run only for non-401/403 errors, you must add a status code guard:
+
+  ```ts
+  onError: (error) => {
+    if (error.statusCode === 401 || error.statusCode === 403) return;
+    showToast(error.message);
+  }
+  ```
+
+### Documentation
+
+- Updated README: `WireInterceptors` type and `initWire` example now include `onResponse` and updated `onRequest` signature.
+- Updated README: `onUnauthorized`, `onForbidden`, and `onError` descriptions reflect cascade behavior.
+
+---
+
 ## [3.2.0] - 2026-04-09
 
 ### Added

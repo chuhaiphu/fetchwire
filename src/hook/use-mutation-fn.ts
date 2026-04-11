@@ -13,11 +13,16 @@ interface MutationState<T> {
 }
 
 /**
- * Mutation without variables. Use when the payload is fixed (e.g. from closure/state).
  *
- * @param mutationFn - Function that returns a promise (e.g. `() => createApi()`).
- * @param options - Optional `invalidatesTags` to refresh subscribed `useFetch` and `useFetchFn` hooks after success.
- * @returns executeMutationFn(options?) — call with no args or only options: `executeMutationFn()` or `executeMutationFn({ onSuccess, onError })`.
+ * @param mutationFn - An async function that performs the mutation.
+ * @param options - Configuration for invalidating tags upon successful execution.
+ * @returns An object containing the mutation state and the execution function.
+ * * @example
+ * const { executeMutationFn, isMutating } = useMutationFn(logoutApi, {
+ * invalidatesTags: ['user-session']
+ * });
+ * // Trigger without arguments:
+ * executeMutationFn({ onSuccess: () => console.log('Logged out') });
  */
 export function useMutationFn<T>(
   mutationFn: (variables: void) => Promise<HttpResponse<T>>,
@@ -32,11 +37,17 @@ export function useMutationFn<T>(
 };
 
 /**
- * Mutation with variables. Use when the payload is passed at call time (e.g. update forms, PATCH body).
  *
- * @param mutationFn - Function that receives variables and returns a promise (e.g. `(data) => updateApi(id, data)`).
- * @param options - Optional `invalidatesTags` to refresh subscribed `useFetch` and `useFetchFn` hooks after success.
- * @returns executeMutationFn(variables, options?) — you must pass variables first, then optional callbacks.
+ * @template TVariables - The type of the input variables for the mutation.
+ * @param mutationFn - An async function receiving variables and returning a promise.
+ * @param options - Configuration for invalidating tags upon successful execution.
+ * @returns An object containing the mutation state and the execution function.
+ * * @example
+ * const { executeMutationFn } = useMutationFn((id: string) => deleteItem(id), {
+ * invalidatesTags: ['items']
+ * });
+ * // Trigger with variables:
+ * executeMutationFn('item-id-123', { onSuccess: () => alert('Deleted') });
  */
 export function useMutationFn<T, TVariables>(
   mutationFn: (variables: TVariables) => Promise<HttpResponse<T>>,

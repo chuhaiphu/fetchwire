@@ -37,9 +37,13 @@ export async function wireApi<T>(
 
   try {
     if (config.interceptors?.onRequest) {
-      await config.interceptors.onRequest(finalRequestConfig);
+      await config.interceptors.onRequest(url, finalRequestConfig);
     }
     const response = await fetch(url, finalRequestConfig);
+
+    if (config.interceptors?.onResponse) {
+      await config.interceptors.onResponse(url, response);
+    }
 
     if (!response.ok) {
       let errorData;
@@ -66,20 +70,15 @@ export async function wireApi<T>(
           ? config.forbiddenStatusCodes
           : [403];
 
-      // Trigger interceptors based on configured status codes
-      if (
-        config.interceptors?.onUnauthorized &&
-        unauthorizedStatusCodes.includes(response.status)
-      ) {
-        config.interceptors.onUnauthorized(apiError);
-      } else if (
-        config.interceptors?.onForbidden &&
-        forbiddenStatusCodes.includes(response.status)
-      ) {
-        config.interceptors.onForbidden(apiError);
-      } else if (config.interceptors?.onError) {
-        config.interceptors.onError(apiError);
+      // Trigger interceptors based on configured status codes.
+      // Cascade behavior: specific handlers (onUnauthorized / onForbidden) fire
+      // first, then onError always fires for every non-OK response.
+      if (unauthorizedStatusCodes.includes(response.status)) {
+        await config.interceptors?.onUnauthorized?.(apiError);
+      } else if (forbiddenStatusCodes.includes(response.status)) {
+        await config.interceptors?.onForbidden?.(apiError);
       }
+      await config.interceptors?.onError?.(apiError);
 
       throw apiError;
     }
