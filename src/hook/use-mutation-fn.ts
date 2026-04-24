@@ -5,7 +5,7 @@ import {
   MutationOptions,
   ExecuteMutationOptions,
 } from '../interface';
-import { eventEmitter } from '../core/event-emitter';
+import { fetchClient } from '../core/fetch-client';
 
 interface MutationState<T> {
   data: T | null;
@@ -109,7 +109,8 @@ export function useMutationFn<T, TVariables = void>(
           });
 
           if (invalidatesTagsKey) {
-            invalidatesTagsKey.split(',').forEach((tag) => eventEmitter.emit(tag));
+            const tagsToInvalidate = invalidatesTagsKey.split(',');
+            fetchClient.invalidateTags(tagsToInvalidate);
           }
           executeOptions?.onSuccess?.(response.data ?? null);
         }

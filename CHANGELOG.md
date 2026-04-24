@@ -1,5 +1,99 @@
 # Changelog
 
+## [4.0.0] - 2026-04-25
+
+### Breaking Changes
+
+- **`prefetch()` signature changed: arguments reversed, second argument is now `FetchOptions`**
+
+  The old signature `prefetch(fetchKey, fetchFn)` is replaced by `prefetch(fetchFn, options)`, matching the same `FetchOptions` object used by `useFetch` and `useFetchFn`. The `fetchKey` is now inside `options`.
+
+  ```ts
+  // Before (3.3.1):
+  prefetch('todos', () => getTodosApi());
+
+  // After (4.0.0):
+  prefetch(() => getTodosApi(), { fetchKey: 'todos' });
+
+  // With tags (also supported):
+  prefetch(() => getTodosApi(), { fetchKey: 'todos', tags: ['todos'] });
+  ```
+
+  **Migration:** swap the argument order and move the key string into `{ fetchKey: '...' }`. Tags are now also supported directly in the `prefetch` call.
+
+- **`promiseCacheStore` is no longer a public export**
+
+  `promiseCacheStore` is no longer exported from the package. For logout-flow cache clearing, use `fetchClient.clear()` instead.
+
+  ```ts
+  // Before (3.3.1):
+  import { promiseCacheStore } from 'fetchwire';
+
+  function handleLogout() {
+    promiseCacheStore.clear();
+  }
+
+  // After (4.0.0):
+  import { fetchClient } from 'fetchwire';
+
+  function handleLogout() {
+    fetchClient.clear();
+  }
+  ```
+
+  **Migration:** replace `promiseCacheStore.clear()` with `fetchClient.clear()`. The `fetchClient.clear()` call also clears the internal tag-to-fetchKey map, ensuring no stale tag associations remain after logout.
+
+### Added
+
+- **`fetchClient` singleton — centralized cache and tag invalidation**
+
+  A new `FetchClient` class is exported as `fetchClient`. It centralizes the relationship between fetch keys, tags, and the promise cache. All hooks (`useFetch`, `useFetchFn`) and `prefetch` now go through `fetchClient` internally instead of writing to `promiseCacheStore` directly.
+
+  ```ts
+  import { fetchClient } from 'fetchwire';
+  ```
+
+  **API:**
+
+  - `fetchClient.clear()` — clears all cached promises AND the internal tag-to-fetchKey map. Use this on logout so no stale data is served after the next login.
+  - `fetchClient.invalidateTags(tags: string[])` — clears all cached promises whose fetch keys are associated with the given tags, then emits refresh events to all mounted hooks subscribed to those tags. Called internally by `useMutationFn`; exposed for advanced use.
+  - `fetchClient.setFetchKeyToTags(fetchKey, promise, tags?)` — stores a promise in the cache and registers its tag associations. Used internally by hooks and `prefetch`; exposed for advanced use.
+
+  **Recommended logout flow:**
+
+  ```ts
+  import { fetchClient } from 'fetchwire';
+
+  function handleLogout() {
+    localStorage.removeItem('access_token');
+    fetchClient.clear();
+  }
+  ```
+
+### Changed
+
+- **Cache invalidation now clears stale entries for unmounted components**
+
+  Previously, when `useMutationFn` invalidated tags, it only emitted events to mounted hooks. If a component was unmounted at the time of invalidation, its stale promise remained in the cache — and when the component remounted, it would receive the old resolved data instead of fetching fresh.
+
+  In 4.0.0, `fetchClient.invalidateTags()` both emits refresh events to mounted hooks AND deletes all cached promises associated with the invalidated tags. Unmounted components will always start a fresh fetch when they next mount after a tag invalidation.
+
+- **`prefetch` now registers tag associations**
+
+  `prefetch(fetchFn, options)` accepts `options.tags`. When provided, `prefetch` registers the tag-to-fetchKey relationship via `fetchClient.setFetchKeyToTags()`, so a tag invalidation triggered by a mutation will correctly clear a key originally populated via `prefetch`.
+
+- **`PromiseCacheMap` renamed to `PromiseCacheStore`**
+
+  The internal promise cache class has been renamed from `PromiseCacheMap` to `PromiseCacheStore` and extracted into its own file (`src/core/promise-cache-store.ts`). It is no longer part of the public export surface; use `fetchClient` for all cache management needs.
+
+### Documentation
+
+- Updated README: `prefetch` usage and API reference reflect the new `prefetch(fetchFn, options)` signature.
+- Updated README: added `fetchClient` API reference section.
+- Updated README: `promiseCacheStore` section updated to reflect it is no longer a public export.
+
+---
+
 ## [3.3.1] - 2026-04-24
 
 ### Breaking Changes
@@ -183,7 +277,7 @@
 ### Added
 
 - **`prefetch(fetchKey, fetchFn)` — pre-fetch data before a component mounts**
-  Populates `promiseCacheMap` ahead of time so that `useFetch` or `useFetchFn` (with matching `fetchKey`) can resolve instantly without a redundant network request.
+  Populates `promiseCacheStore` ahead of time so that `useFetch` or `useFetchFn` (with matching `fetchKey`) can resolve instantly without a redundant network request.
 
   ```ts
   import { prefetch } from 'fetchwire';
@@ -222,7 +316,7 @@
   ```
 
 - **`fetchKey` option in `FetchOptions`**
-  `FetchOptions` now accepts an optional `fetchKey` string. When provided to `useFetchFn`, the hook integrates with `promiseCacheMap`:
+  `FetchOptions` now accepts an optional `fetchKey` string. When provided to `useFetchFn`, the hook integrates with `promiseCacheStore`:
   - On the first `executeFetchFn()` call, it checks the cache for a prefetched Promise (set by `prefetch()`), avoiding a duplicate request.
   - On every fetch, the Promise is stored in the cache under `fetchKey`, enabling deduplication if multiple hooks share the same key.
 
@@ -311,17 +405,17 @@
   - `refreshFetch` — replaces the cached Promise with a fresh one, causing the component to re-suspend and show the nearest `<Suspense>` fallback.
   - Supports tag-based invalidation via `options.tags` — the same mechanism used by `useFetchFn`.
 
-- **`promiseCacheMap` singleton**
-  The `Map`-backed promise cache used by `useFetch` is now exported as `promiseCacheMap`. Use it for advanced cache management — removing a specific entry to force a cold refetch, or calling `promiseCacheMap.clear()` to discard all cached Promises on logout.
+- **`promiseCacheStore` singleton**
+  The `Map`-backed promise store used by `useFetch` is now exported as `promiseCacheStore`. Use it for advanced cache management — removing a specific entry to force a cold refetch, or calling `promiseCacheStore.clear()` to discard all cached Promises on logout.
 
   ```ts
-  import { promiseCacheMap } from 'fetchwire';
+  import { promiseCacheStore } from 'fetchwire';
 
   // Force a cold refetch for a single key
-  promiseCacheMap.delete('todos');
+  promiseCacheStore.delete('todos');
 
   // Discard all entries on logout
-  promiseCacheMap.clear();
+  promiseCacheStore.clear();
   ```
 
 ### Documentation

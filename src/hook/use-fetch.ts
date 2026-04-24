@@ -1,8 +1,9 @@
 import { useEffect, useCallback, use, useState, useTransition } from 'react';
 import { HttpResponse, FetchOptions } from '../interface';
 import { eventEmitter } from '../core/event-emitter';
-import { promiseCacheMap } from '../core/promise-cache-map';
+import { promiseCacheStore } from '../core/promise-cache-store';
 import { extractHttpResponseData } from '../util/helper';
+import { fetchClient } from '../core/fetch-client';
 
 /**
  * A hook that fetches immediately on mount and suspends
@@ -46,6 +47,13 @@ export function useFetch<T>(
 } {
   const { fetchKey } = options;
 
+  // Each time the consumer component renders, a brand new options object is created,
+  // Which would cause the useEffect to re-run, even if the tags are the same.
+  // So we need to create a string key for it by stringifying from options.tags.
+  // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.
+  // This assumes that the tags themselves don't contain commas.
+  const tagsKey = options.tags?.join(',') ?? '';
+
   // Why if we don't cache the promise?
   // 1. Each time the Component is rendered, a new Pending Promise from fetch is created
   // 2. After use(promise) hook run, React will abort the current render, dispose all the states
@@ -56,40 +64,33 @@ export function useFetch<T>(
   // ---
   // Set the promise in cache if not exists.
   // This ensures that the same promise is used across renders.
-  if (!promiseCacheMap.has(fetchKey)) {
-    promiseCacheMap.set(
-      fetchKey,
-      fetch().then((res) => extractHttpResponseData(res)).catch((error) => {
-        // Remove the rejected promise from cache to allow retry in next fetch.
-        promiseCacheMap.delete(fetchKey);
+  if (!promiseCacheStore.has(fetchKey)) {
+    const rawPromise = fetch()
+      .then((res) => extractHttpResponseData(res))
+      .catch((error) => {
+        promiseCacheStore.delete(fetchKey);
         throw error;
-      })
-    );
+      });
+    const tags = tagsKey.split(',');
+    fetchClient.setFetchKeyToTags(fetchKey, rawPromise, tags);
   }
 
   // Get the cached promise
   const [promise, setPromise] = useState<Promise<T | undefined>>(
-    () => promiseCacheMap.get(fetchKey) as Promise<T>
+    () => promiseCacheStore.get(fetchKey) as Promise<T>
   );
 
   const [isPending, startTransition] = useTransition();
 
-  // Replaces the current Promise with a new one.
-  // use() will see the new Promise and re-suspend the component, showing the <Suspense> fallback.
   const refreshFetch = useCallback(() => {
     const newPromise = fetch().then((res) => extractHttpResponseData(res));
-    promiseCacheMap.set(fetchKey, newPromise);
+    const tags = tagsKey.split(',');
+    fetchClient.setFetchKeyToTags(fetchKey, newPromise, tags);
     startTransition(() => {
       setPromise(newPromise);
     });
-  }, [fetch, fetchKey]);
+  }, [fetch, fetchKey, tagsKey]);
 
-  // Each time the consumer component renders, a brand new options object is created,
-  // Which would cause the useEffect to re-run, even if the tags are the same.
-  // So we need to create a string key for it by stringifying from options.tags.
-  // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.
-  // This assumes that the tags themselves don't contain commas.
-  const tagsKey = options.tags?.join(',') ?? '';
   useEffect(() => {
     if (!tagsKey) return;
     const tags = tagsKey.split(',');

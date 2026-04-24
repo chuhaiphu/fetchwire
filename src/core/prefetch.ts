@@ -1,18 +1,19 @@
-import { HttpResponse } from '../interface';
+import { FetchOptions, HttpResponse } from '../interface';
 import { extractHttpResponseData } from '../util/helper';
-import { promiseCacheMap } from './promise-cache-map';
+import { fetchClient } from './fetch-client';
+import { promiseCacheStore } from './promise-cache-store';
 
 export function prefetch<T>(
-  fetchKey: string,
-  fetchFn: () => Promise<HttpResponse<T> | T>
+  fetchFn: () => Promise<HttpResponse<T> | T>,
+  options: FetchOptions
 ) {
   // If the promise is already in the cacheMap, return it
-  if (promiseCacheMap.has(fetchKey)) {
-    return promiseCacheMap.get(fetchKey);
+  if (promiseCacheStore.has(options.fetchKey)) {
+    return promiseCacheStore.get(options.fetchKey);
   }
 
   // Otherwise, execute the fetch function and store in the cacheMap then return it
   const promise = fetchFn().then((res) => extractHttpResponseData(res));
-  promiseCacheMap.set(fetchKey, promise)
+  fetchClient.setFetchKeyToTags(options.fetchKey, promise, options?.tags);
   return promise;
 }

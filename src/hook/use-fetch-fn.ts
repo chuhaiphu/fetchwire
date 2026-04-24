@@ -2,8 +2,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { ApiError } from '../util/api-error';
 import { HttpResponse, FetchOptions } from '../interface';
 import { eventEmitter } from '../core/event-emitter';
-import { promiseCacheMap } from '../core/promise-cache-map';
+import { promiseCacheStore } from '../core/promise-cache-store';
 import { extractHttpResponseData } from '../util/helper';
+import { fetchClient } from '../core/fetch-client';
 
 interface FetchState<T> {
   data: T | null;
@@ -78,6 +79,16 @@ export function useFetchFn<T>(
   // 5. The component will re-render because the state is updated.
   // 6. Repeat from step 1, which creates an infinite loop of fetches and re-renders.
   const fetchKey = options.fetchKey;
+  
+  
+  // Because options.tags is an array,
+  // Each time the consumer component renders, a brand new array is created,
+  // Which would cause the useEffect to re-run, even if the tags are the same.
+  // So we need to create a string key for it by stringifying from options.tags.
+  // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.
+  // This assumes that the tags themselves don't contain commas.
+  const tagsKey = options.tags?.join(',') ?? '';
+
   const execute = useCallback(
     async (execOptions: { isRefresh: boolean }): Promise<T | null> => {
       // Get the latest fetchFn reference from the ref, which is updated by the useEffect above each time the fetchFn changes.
@@ -91,17 +102,16 @@ export function useFetchFn<T>(
 
       try {
         let data: T;
-        if (!execOptions.isRefresh && fetchKey && promiseCacheMap.has(fetchKey)) {
+        if (!execOptions.isRefresh && promiseCacheStore.has(fetchKey)) {
           // Get the Promise cache function from the fetchKey that prefetch() have set
           // So do not have to perform fetching again
-          data = (await promiseCacheMap.get(fetchKey)) as T;
+          data = (await promiseCacheStore.get(fetchKey)) as T;
         } else {
           const rawPromise = fn().then((res) => extractHttpResponseData(res));
           // Set the promise right away so if there is any fetch with the same fetchKey,
           // it will be served with promise from cacheMap instead of create a brand new promise.
-          if (fetchKey) {
-            promiseCacheMap.set(fetchKey, rawPromise);
-          }
+          const tags = tagsKey.split(',');
+          fetchClient.setFetchKeyToTags(fetchKey, rawPromise, tags);
           data = await rawPromise;
         }
 
@@ -127,7 +137,7 @@ export function useFetchFn<T>(
         return null;
       }
     },
-    [fetchKey]
+    [fetchKey, tagsKey]
   );
 
   const executeFetchFn = useCallback(
@@ -140,13 +150,6 @@ export function useFetchFn<T>(
     setState({ data: null, isLoading: false, isRefreshing: false, error: null });
   }, []);
 
-  // Because options.tags is an array,
-  // Each time the consumer component renders, a brand new array is created,
-  // Which would cause the useEffect to re-run, even if the tags are the same.
-  // So we need to create a string key for it by stringifying from options.tags.
-  // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.
-  // This assumes that the tags themselves don't contain commas.
-  const tagsKey = options.tags?.join(',') ?? '';
   useEffect(() => {
     if (!tagsKey) return;
     const tags = tagsKey.split(',');

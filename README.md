@@ -57,6 +57,9 @@ If you find **fetchwire** helpful and want to support its development, you can b
 - **`prefetch` for eager data loading**
   - Pre-populate the promise cache before a component mounts, so `useFetch` / `useFetchFn` can resolve instantly without a redundant request.
 
+- **`fetchClient` for centralized cache management**
+  - A singleton that centralizes tag-to-fetchKey tracking and cache invalidation. Call `fetchClient.clear()` on logout to clear all cached data and tag associations in one step.
+
 ---
 
 ## Installation
@@ -453,7 +456,7 @@ This pattern keeps your code explicit and small, without introducing a full quer
 
 ### 6. Pre-fetch data with `prefetch`
 
-`prefetch` lets you start loading data before a component mounts — for example in a route loader, an event handler, or during page navigation. The fetched Promise is stored in `promiseCacheMap`, so when the component renders with a matching key, it resolves instantly without a duplicate request.
+`prefetch` lets you start loading data before a component mounts — for example in a route loader, an event handler, or during page navigation. The fetched Promise is stored in the internal cache via `fetchClient`, so when the component renders with a matching key, it resolves instantly without a duplicate request.
 
 ```tsx
 import { prefetch } from 'fetchwire';
@@ -461,7 +464,10 @@ import { getTodosApi } from '../api/todo-api';
 
 // In a route loader or link hover handler
 function onNavigateToTodos() {
-  prefetch('todos', () => getTodosApi());
+  prefetch(() => getTodosApi(), { fetchKey: 'todos' });
+
+  // Optionally include tags — registered for invalidation alongside useFetch/useFetchFn:
+  // prefetch(() => getTodosApi(), { fetchKey: 'todos', tags: ['todos'] });
 }
 ```
 
@@ -469,9 +475,12 @@ When the component renders:
 
 ```tsx
 // useFetch — uses the same fetchKey, resolves from cache
-const { data: todos } = useFetch(getTodosApi, { fetchKey: 'todos', tags: ['todos'] });
+const { data: todos } = useFetch(getTodosApi, {
+  fetchKey: 'todos',
+  tags: ['todos'],
+});
 
-// useFetchFn — pass fetchKey in options to consume the prefetched Promise
+// useFetchFn — uses the same fetchKey, resolves from cache on first executeFetchFn()
 const { data: todos, executeFetchFn } = useFetchFn(getTodosApi, {
   fetchKey: 'todos',
   tags: ['todos'],
@@ -693,69 +702,73 @@ Fetches immediately on mount and **suspends** the component while data is loadin
 
 ---
 
-### `promiseCacheMap`
+### `fetchClient`
 
-The shared singleton instance of `PromiseCacheMap` — the internal Promise cache that backs `useFetch`. It is exported for advanced use cases where you need to manage the cache directly.
+The exported singleton instance of `FetchClient`. It centralizes the mapping between fetch keys, tags, and the internal promise cache. All hooks and `prefetch` use it internally.
 
 ```ts
-class PromiseCacheMap {
-  get(key: string): Promise<unknown> | undefined;
-  set(key: string, promise: Promise<unknown>): void;
-  has(key: string): boolean;
-  delete(key: string): void;
+class FetchClient {
+  setFetchKeyToTags(fetchKey: string, promise: Promise<unknown>, tags?: string[]): void;
+  invalidateTags(tags: string[]): void;
   clear(): void;
 }
 
-const promiseCacheMap: PromiseCacheMap;
+const fetchClient: FetchClient;
 ```
 
-**Common use cases:**
+**Methods:**
 
-- **Remove a specific entry** — the next render of `useFetch` with that key will start a cold fetch from scratch:
-
-  ```ts
-  import { promiseCacheMap } from 'fetchwire';
-
-  promiseCacheMap.delete('todos');
-  ```
-
-- **Clear everything on logout** — discard all cached Promises so no stale data is served after a new login:
+- **`fetchClient.clear()`** — removes all entries from the promise cache and resets the tag-to-fetchKey map. Call this on logout so no stale cached data persists into the next session.
 
   ```ts
-  import { promiseCacheMap } from 'fetchwire';
+  import { fetchClient } from 'fetchwire';
 
   function handleLogout() {
-    // ... clear auth token ...
-    promiseCacheMap.clear();
+    localStorage.removeItem('access_token');
+    fetchClient.clear();
   }
   ```
 
-> **Note:** Reach for `promiseCacheMap` only when you need explicit, imperative control over the cache (e.g. logout flows, deep cache resets).
+- **`fetchClient.invalidateTags(tags)`** — for each tag, deletes all associated cached promises and emits refresh events to any currently-mounted `useFetch` / `useFetchFn` hooks subscribed to those tags. Called automatically by `useMutationFn` after a successful mutation; exposed for advanced scenarios where you need to trigger invalidation imperatively (e.g. after a WebSocket push).
+
+  ```ts
+  import { fetchClient } from 'fetchwire';
+
+  // Imperatively invalidate a tag
+  fetchClient.invalidateTags(['todos']);
+  ```
+
+- **`fetchClient.setFetchKeyToTags(fetchKey, promise, tags?)`** — stores a promise in the cache under `fetchKey` and registers the tag relationships. Used internally by `useFetch`, `useFetchFn`, and `prefetch`. Exposed for advanced use cases such as a custom prefetch wrapper.
+
+> **Note:** For most application code, `fetchClient.clear()` is the only method you need to call directly.
 
 ---
 
-### `prefetch<T>(fetchKey, fetchFn)`
+### `prefetch<T>(fetchFn, options)`
 
 ```ts
 function prefetch<T>(
-  fetchKey: string,
-  fetchFn: () => Promise<HttpResponse<T> | T>
+  fetchFn: () => Promise<HttpResponse<T> | T>,
+  options: FetchOptions
 ): Promise<unknown> | undefined;
 ```
 
-Pre-populates `promiseCacheMap` with the result of `fetchFn` so that subsequent `useFetch` or `useFetchFn` calls with the same key resolve instantly.
+Pre-populates the internal promise cache (via `fetchClient`) with the result of `fetchFn` so that subsequent `useFetch` or `useFetchFn` calls with the same `fetchKey` resolve instantly.
 
-- **`fetchKey`**: The cache key. Must match the `fetchKey` passed to `useFetch` or `options.fetchKey` passed to `useFetchFn`.
 - **`fetchFn`**: Async function that returns `HttpResponse<T>` or raw `T`. The response is auto-unwrapped via `extractHttpResponseData`.
-- **Returns**: The cached or newly created Promise.
-- If a Promise already exists for `fetchKey`, the existing one is returned — no duplicate fetch.
+- **`options.fetchKey`**: Required. The cache key. Must match the `fetchKey` in the `options` passed to `useFetch` or `useFetchFn`.
+- **`options.tags`**: Optional. Tags to associate with this fetch key. When a mutation later invalidates these tags, this cached promise is cleared even if the component is not currently mounted.
+- **Returns**: The cached or newly created Promise. If a Promise already exists for `fetchKey`, the existing one is returned — no duplicate fetch.
 
 ```ts
 import { prefetch } from 'fetchwire';
 import { getTodosApi } from './api/todo-api';
 
 // Call in a route loader, link hover, or before navigating
-prefetch('todos', () => getTodosApi());
+prefetch(() => getTodosApi(), { fetchKey: 'todos' });
+
+// With tags (recommended if you also use tags in useFetch/useFetchFn):
+prefetch(() => getTodosApi(), { fetchKey: 'todos', tags: ['todos'] });
 ```
 
 ---
@@ -783,7 +796,7 @@ function useFetchFn<T>(
 ```
 
 - **`fetchFn`**: Async function (e.g. an API helper using `wireApi<T>`). Type `T` is inferred from its return type.
-- **`options.fetchKey`**: Required unique string key that integrates with `promiseCacheMap`. On the first `executeFetchFn()` call, the hook checks the cache for a prefetched Promise (set by `prefetch()`), avoiding a duplicate request. Every fetch also stores its Promise in the cache under this key for deduplication.
+- **`options.fetchKey`**: Required unique string key used to cache the in-flight promise via `fetchClient`. On the first `executeFetchFn()` call, the hook checks the cache for a prefetched Promise (set by `prefetch()`), avoiding a duplicate request. Every fetch also stores its Promise in the cache under this key for deduplication.
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetchFn` is called automatically.
 - **`executeFetchFn()`**: Runs `fetchFn`. Sets `isLoading: true` during the call; updates `data` and `error` on completion. Returns `Promise<T | null>` — the response is automatically unwrapped.
 - **`refreshFetchFn()`**: Re-runs the same `fetchFn`. Sets `isRefreshing: true` during the call (keeps existing `data` visible). Returns `Promise<T | null>`.

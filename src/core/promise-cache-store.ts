@@ -1,13 +1,12 @@
-
 /**
- * A `Map`-backed cache that stores in-flight Promises by string key.
+ * A `Map`-backed promise store that stores in-flight Promises by string key.
  *
  * Used internally by `useFetch` to ensure the same Promise is reused across
  * re-renders during suspension — without this, React would create a new
  * pending Promise on every re-render and the component would suspend
  * indefinitely.
  */
-class PromiseCacheMap {
+class PromiseCacheStore {
   private cacheMap = new Map<string, Promise<unknown>>();
 
   /**
@@ -55,18 +54,4 @@ class PromiseCacheMap {
     this.cacheMap.clear();
   }
 }
-
-/**
- * The shared `PromiseCacheMap` instance used by all `useFetch` hooks.
- *
- * You can use this singleton to perform manual cache operations:
- *
- * ```ts
- * // Remove a specific entry so the next render triggers a cold refetch
- * promiseCacheMap.delete('todos');
- *
- * // Clear everything on logout
- * promiseCacheMap.clear();
- * ```
- */
-export const promiseCacheMap = new PromiseCacheMap();
+export const promiseCacheStore = new PromiseCacheStore();
