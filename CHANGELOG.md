@@ -1,5 +1,68 @@
 # Changelog
 
+## [3.3.1] - 2026-04-24
+
+### Breaking Changes
+
+- **`useFetch`: `fetchKey` moved into `options` (now required)**
+
+  `fetchKey` is no longer a standalone second argument. It is now a required field inside the `options` object, which is itself the second argument.
+
+  ```ts
+  // Before:
+  useFetch(getTodosApi, 'todos', { tags: ['todos'] });
+  useFetch(getTodosApi, 'todos');
+
+  // After:
+  useFetch(getTodosApi, { fetchKey: 'todos', tags: ['todos'] });
+  useFetch(getTodosApi, { fetchKey: 'todos' });
+  ```
+
+  **Migration:** move the string you were passing as the second argument into `options.fetchKey`.
+
+- **`useFetchFn`: `options` is now required, `fetchKey` is required**
+
+  `options` was previously optional and `fetchKey` inside it was optional. Both are now required.
+
+  ```ts
+  // Before:
+  useFetchFn(getTodosApi);
+  useFetchFn(getTodosApi, { tags: ['todos'] });
+  useFetchFn(getTodosApi, { fetchKey: 'todos', tags: ['todos'] });
+
+  // After:
+  useFetchFn(getTodosApi, { fetchKey: 'todos' });
+  useFetchFn(getTodosApi, { fetchKey: 'todos', tags: ['todos'] });
+  ```
+
+  **Migration:** add `fetchKey` to the options object for every `useFetchFn` call. Choose a key that uniquely identifies the resource (e.g. `'todos'`, `'user-' + userId`).
+
+- **`FetchOptions`: `fetchKey` is now required, field order changed**
+
+  The `fetchKey` field is no longer optional (`fetchKey?: string` → `fetchKey: string`).
+  It now appears before `tags` in the type definition to reflect that it is required.
+
+  ```ts
+  // Before:
+  type FetchOptions = {
+    tags?: string[];
+    fetchKey?: string;
+  };
+
+  // After:
+  type FetchOptions = {
+    fetchKey: string;
+    tags?: string[];
+  };
+  ```
+
+### Documentation
+
+- Updated README: all `useFetch` and `useFetchFn` examples and API reference entries reflect the new unified `options` signature.
+- Updated JSDoc for `FetchOptions`, `useFetch`, and `useFetchFn`.
+
+---
+
 ## [3.3.0] - 2026-04-11
 
 ### Added

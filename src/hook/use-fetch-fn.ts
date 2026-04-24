@@ -14,21 +14,28 @@ interface FetchState<T> {
 
 /**
  * A hook for manually handling the execution of a fetch function and managing the state of that fetch.
- * @param fetch - A promise function that returns `Promise<HttpResponse<T>>`.
- * @param options - Optional `tags` that will trigger a refresh when a
- *   `useMutationFn` with matching `invalidatesTags` completes.
- *   Tag strings must not contain commas.
+ *
+ * @param fetchFn - A promise function that returns `Promise<HttpResponse<T>>`.
+ * @param options - Required options for this hook.
+ *   - `fetchKey` — a unique key used to cache the in-flight promise. If `prefetch()`
+ *     was called with the same key beforehand, the first execution will reuse the
+ *     cached promise instead of firing a new network request.
+ *   - `tags` — optional list of tag strings that will trigger a refresh when a
+ *     `useMutationFn` with matching `invalidatesTags` completes.
+ *     Tag strings must not contain commas.
+ *
  * @returns
- *   - `isLoading` — a boolean indicating if the fetch is currently executing.
- *   - `isRefreshing` — a boolean indicating if the fetch is currently refreshing.
- *   - `error` — an error object if the fetch failed, or null if no error occurred.
- *   - `executeFetchFn` — a function to manually execute the fetch function.
- *   - `refreshFetchFn` — a function to manually refresh the fetch function.
- *   - `reset` — a function to manually reset the fetch state.
+ *   - `data` — the resolved value of type `T`, or null if not yet fetched.
+ *   - `isLoading` — true while the initial fetch is in flight.
+ *   - `isRefreshing` — true while a refresh is in flight.
+ *   - `error` — an `ApiError` if the last fetch failed, otherwise null.
+ *   - `executeFetchFn` — trigger the initial fetch manually.
+ *   - `refreshFetchFn` — trigger a refresh (bypasses the promise cache).
+ *   - `reset` — reset state back to the initial idle state.
  */
 export function useFetchFn<T>(
   fetchFn: () => Promise<HttpResponse<T>>,
-  options?: FetchOptions
+  options: FetchOptions
 ) {
   const [state, setState] = useState<FetchState<T>>({
     data: null,
@@ -70,7 +77,7 @@ export function useFetchFn<T>(
   // 4. Then it will trigger a new fetch and update the state.
   // 5. The component will re-render because the state is updated.
   // 6. Repeat from step 1, which creates an infinite loop of fetches and re-renders.
-  const fetchKey = options?.fetchKey;
+  const fetchKey = options.fetchKey;
   const execute = useCallback(
     async (execOptions: { isRefresh: boolean }): Promise<T | null> => {
       // Get the latest fetchFn reference from the ref, which is updated by the useEffect above each time the fetchFn changes.
@@ -139,7 +146,7 @@ export function useFetchFn<T>(
   // So we need to create a string key for it by stringifying from options.tags.
   // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.
   // This assumes that the tags themselves don't contain commas.
-  const tagsKey = options?.tags?.join(',') ?? '';
+  const tagsKey = options.tags?.join(',') ?? '';
   useEffect(() => {
     if (!tagsKey) return;
     const tags = tagsKey.split(',');

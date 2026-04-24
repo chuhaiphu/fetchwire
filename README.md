@@ -262,7 +262,8 @@ function TodoList() {
     data: todos,
     refreshFetch,
     isRefreshing,
-  } = useFetch(getTodosApi, 'todos', {
+  } = useFetch(getTodosApi, {
+    fetchKey: 'todos',
     tags: ['todos'],
   });
 
@@ -318,6 +319,7 @@ export function TodoList() {
     executeFetchFn: fetchTodos,
     refreshFetchFn: refreshTodos,
   } = useFetchFn(getTodosApi, {
+    fetchKey: 'todos',
     tags: ['todos'],
   });
 
@@ -437,7 +439,7 @@ export function TodoActions() {
 
 Tags provide a simple way to coordinate refetches across your app:
 
-- `useFetch(fetchFn, fetchKey, { tags: [...] })` and `useFetchFn(fetchFn, { tags: [...] })` subscribe to one or more **tags**.
+- `useFetch(fetchFn, { fetchKey: '...', tags: [...] })` and `useFetchFn(fetchFn, { fetchKey: '...', tags: [...] })` subscribe to one or more **tags**.
 - `useMutationFn(mutationFn, { invalidatesTags: [...] })` emits those tags after a **successful** mutation.
 - When a tag is emitted, all subscribed fetch hooks will automatically refresh:
   - `useFetch` — calls `refreshFetch` via `useTransition`, keeping the current data visible while loading.
@@ -467,12 +469,12 @@ When the component renders:
 
 ```tsx
 // useFetch — uses the same fetchKey, resolves from cache
-const { data: todos } = useFetch(getTodosApi, 'todos', { tags: ['todos'] });
+const { data: todos } = useFetch(getTodosApi, { fetchKey: 'todos', tags: ['todos'] });
 
 // useFetchFn — pass fetchKey in options to consume the prefetched Promise
 const { data: todos, executeFetchFn } = useFetchFn(getTodosApi, {
-  tags: ['todos'],
   fetchKey: 'todos',
+  tags: ['todos'],
 });
 ```
 
@@ -535,7 +537,7 @@ All errors are normalized to an `ApiError` instance. It extends `Error` and typi
 **With `useFetchFn`** — read the `error` field directly from the hook state:
 
 ```tsx
-const { error } = useFetchFn(getTodosApi);
+const { error } = useFetchFn(getTodosApi, { fetchKey: 'todos' });
 if (error) return <div>Error: {error.message}</div>;
 ```
 
@@ -660,18 +662,17 @@ const result = await wireApi<UserResponse>('/user/me', { method: 'GET' });
 
 ---
 
-### `useFetch<T>(fetch, fetchKey, options?)`
+### `useFetch<T>(fetch, options)`
 
 ```ts
 type FetchOptions = {
+  fetchKey: string;
   tags?: string[];
-  fetchKey?: string;
 };
 
 function useFetch<T>(
   fetch: () => Promise<HttpResponse<T> | T>,
-  fetchKey: string,
-  options?: FetchOptions
+  options: FetchOptions
 ): {
   data: T | null;
   refreshFetch: () => void;
@@ -682,7 +683,7 @@ function useFetch<T>(
 Fetches immediately on mount and **suspends** the component while data is loading. Requires a `<Suspense>` boundary for the loading state and an `<ErrorBoundary>` for API errors in the parent tree.
 
 - **`fetch`**: Async function that can return either `HttpResponse<T>` or raw `T` (e.g. `wireApi<T>` helper or plain transformed payload). Type `T` is inferred from its return type.
-- **`fetchKey`**: Unique string key for this fetch, used to cache the in-flight Promise and prevent infinite re-suspension on re-render.
+- **`options.fetchKey`**: Required unique string key for this fetch, used to cache the in-flight Promise and prevent infinite re-suspension on re-render. Must match the key passed to `prefetch()` if prefetching is used.
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetch` is called automatically.
 - **`data`**: The resolved value from the fetch. The component suspends until this is available.
 - **`refreshFetch()`**: Replaces the cached Promise with a fresh one. Uses `useTransition` internally, so React keeps showing the current data while the new fetch loads — the `<Suspense>` fallback is **not** shown during refresh.
@@ -759,17 +760,17 @@ prefetch('todos', () => getTodosApi());
 
 ---
 
-### `useFetchFn<T>(fetchFn, options?)`
+### `useFetchFn<T>(fetchFn, options)`
 
 ```ts
 type FetchOptions = {
+  fetchKey: string;
   tags?: string[];
-  fetchKey?: string;
 };
 
 function useFetchFn<T>(
   fetchFn: () => Promise<HttpResponse<T>>,
-  options?: FetchOptions
+  options: FetchOptions
 ): {
   data: T | null;
   isLoading: boolean;
@@ -782,8 +783,8 @@ function useFetchFn<T>(
 ```
 
 - **`fetchFn`**: Async function (e.g. an API helper using `wireApi<T>`). Type `T` is inferred from its return type.
+- **`options.fetchKey`**: Required unique string key that integrates with `promiseCacheMap`. On the first `executeFetchFn()` call, the hook checks the cache for a prefetched Promise (set by `prefetch()`), avoiding a duplicate request. Every fetch also stores its Promise in the cache under this key for deduplication.
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetchFn` is called automatically.
-- **`options.fetchKey`**: Optional string key that integrates with `promiseCacheMap`. When provided, `executeFetchFn` will first check the cache for a prefetched Promise (set by `prefetch()`), avoiding a duplicate request. Every fetch also stores its Promise in the cache under this key for deduplication.
 - **`executeFetchFn()`**: Runs `fetchFn`. Sets `isLoading: true` during the call; updates `data` and `error` on completion. Returns `Promise<T | null>` — the response is automatically unwrapped.
 - **`refreshFetchFn()`**: Re-runs the same `fetchFn`. Sets `isRefreshing: true` during the call (keeps existing `data` visible). Returns `Promise<T | null>`.
 - **`reset()`**: Resets `data`, `isLoading`, `isRefreshing`, and `error` back to their initial values.

@@ -141,10 +141,23 @@ export interface WireConfig {
  */
 export interface FetchOptions {
   /**
+   * A unique key used to cache the in-flight promise.
+   *
+   * This key is shared with `prefetch()` — if `prefetch()` was called with the
+   * same key before the hook mounts, the hook will reuse the cached promise and
+   * avoid a duplicate network request.
+   *
+   * The key must be unique across all concurrent fetches. A good convention is
+   * to include the resource name and any dynamic segments, e.g. `"todos"` or
+   * `"user-" + userId`.
+   */
+  fetchKey: string;
+
+  /**
    * Tags that this fetch subscribes to.
    *
    * When a mutation invalidates any of these tags, the hook will automatically
-   * re‑run the last request via `refreshFetchFn`.
+   * re‑run the last request.
    *
    * @constraint Tag strings must not contain commas. Commas are used internally
    * to serialize the tag array into a stable dependency key.
@@ -154,7 +167,6 @@ export interface FetchOptions {
    * tags: ['todo,list']           // ✗ invalid — comma will break tag matching
    */
   tags?: string[];
-  fetchKey?: string;
 }
 
 /**

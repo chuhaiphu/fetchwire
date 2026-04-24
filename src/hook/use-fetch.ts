@@ -22,26 +22,30 @@ import { extractHttpResponseData } from '../util/helper';
  *
  * @param fetch - A promise function that returns `Promise<HttpResponse<T> | T>`.
  *   You can return a standard `HttpResponse<T>` envelope or raw data `T`.
- * @param fetchKey - A unique key for this fetch, used for caching promise.
- * @param options - Optional `tags` that will trigger a refresh when a
- *   `useMutationFn` with matching `invalidatesTags` completes.
- *   Tag strings must not contain commas.
+ * @param options - Required options for this hook.
+ *   - `fetchKey` — a unique key used to cache the in-flight promise. Must match
+ *     the key passed to `prefetch()` if prefetching is used.
+ *   - `tags` — optional list of tag strings that will trigger a refresh when a
+ *     `useMutationFn` with matching `invalidatesTags` completes.
+ *     Tag strings must not contain commas.
  *
  * @returns
  *   - `data` — the resolved value of type `T` or null.
  *   - `refreshFetch` — a function to manually trigger a new fetch. The component will re-suspend
  *     and the nearest `<Suspense>` fallback will be shown.
+ *   - `isRefreshing` — true while a triggered refresh is in flight.
  */
 
 export function useFetch<T>(
   fetch: () => Promise<HttpResponse<T> | T>,
-  fetchKey: string,
-  options?: FetchOptions
+  options: FetchOptions
 ): {
   data: T | null;
   refreshFetch: () => void;
   isRefreshing: boolean;
 } {
+  const { fetchKey } = options;
+
   // Why if we don't cache the promise?
   // 1. Each time the Component is rendered, a new Pending Promise from fetch is created
   // 2. After use(promise) hook run, React will abort the current render, dispose all the states
@@ -85,7 +89,7 @@ export function useFetch<T>(
   // So we need to create a string key for it by stringifying from options.tags.
   // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.
   // This assumes that the tags themselves don't contain commas.
-  const tagsKey = options?.tags?.join(',') ?? '';
+  const tagsKey = options.tags?.join(',') ?? '';
   useEffect(() => {
     if (!tagsKey) return;
     const tags = tagsKey.split(',');
