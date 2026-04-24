@@ -1,7 +1,7 @@
 {
   "name": "fetchwire",
   "type": "module",
-  "version": "3.3.1",
+  "version": "4.0.0",
   "description": "A lightweight, focused API fetching library for React 19+ applications.",
   "repository": {
     "type": "git",
