@@ -541,7 +541,7 @@ All errors are normalized to an `ApiError` instance. It extends `Error` and typi
 
 ### Using ApiError in components
 
-**With `useFetch`** — errors are thrown and caught by the nearest `<ErrorBoundary>`. You do not handle them in the component itself.
+**With `useFetch`** — errors are thrown and caught by the nearest `<ErrorBoundary>`. You do not handle them in the component itself. See [Retrying after an API error](#retrying-after-an-api-error) if you need the user to be able to retry.
 
 **With `useFetchFn`** — read the `error` field directly from the hook state:
 
@@ -575,6 +575,75 @@ executeMutationFn(payload, {
   },
 });
 ```
+
+---
+
+## Retrying after an API error
+
+### Why `refreshFetch` cannot retry from an `<ErrorBoundary>`
+
+`refreshFetch` (returned by `useFetch`) works by updating an internal `useState` and overwriting the promise cache. Both of these operations require the component to be **mounted**. When an API call fails, `useFetch` throws the error to the nearest `<ErrorBoundary>`, which **unmounts** the component and replaces it with the fallback UI. At that point:
+
+- `refreshFetch` is no longer accessible (it lives inside the unmounted component).
+- Even if you held a stale reference to it, calling `setPromise` on an unmounted component has no effect.
+
+### The correct pattern: `fetchClient.remove(fetchKey)`
+
+`fetchClient.remove(fetchKey)` deletes the rejected Promise from the cache without emitting any tag events. It works independently of whether the component is mounted. Call it in your `<ErrorBoundary>`'s reset handler **before** the component remounts, so the next render finds an empty cache entry and starts a fresh fetch.
+
+```tsx
+import { fetchClient } from 'fetchwire';
+
+// React (web) example using react-error-boundary
+import { ErrorBoundary } from 'react-error-boundary';
+
+function TodoPage() {
+  return (
+    <ErrorBoundary
+      fallbackRender={({ error, resetErrorBoundary }) => (
+        <div>
+          <p>Failed to load: {error.message}</p>
+          <button onClick={resetErrorBoundary}>Retry</button>
+        </div>
+      )}
+      onReset={() => {
+        // Clear the rejected Promise from cache before the component remounts.
+        // Without this, the next mount finds the same rejected Promise and
+        // immediately throws again — the ErrorBoundary would loop forever.
+        fetchClient.remove('todos');
+      }}
+    >
+      <Suspense fallback={<div>Loading…</div>}>
+        <TodoList />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+```
+
+```tsx
+// React Native example (custom ErrorBoundary with a resetKeys prop or similar)
+import { fetchClient } from 'fetchwire';
+
+function WageDetailPage({ wageId }: { wageId: string }) {
+  const fetchKey = `receipt-payment-list-in-wage-${wageId}`;
+
+  return (
+    <ErrorBoundary
+      onReset={() => fetchClient.remove(fetchKey)}
+      fallback={<RetryButton onPress={resetErrorBoundary} />}
+    >
+      <Suspense fallback={<ListSkeleton />}>
+        <ReceiptPaymentWageList wageId={wageId} />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+```
+
+### Why not `fetchClient.invalidateTags(tags)`?
+
+`invalidateTags` both clears the cache **and** emits tag events to trigger `refreshFetch` on mounted hooks. When the component is unmounted (inside an ErrorBoundary), there are no listeners — the event is a no-op. Using `fetchClient.remove(fetchKey)` is the minimal, correct call for this scenario.
 
 ---
 
@@ -695,7 +764,7 @@ Fetches immediately on mount and **suspends** the component while data is loadin
 - **`options.fetchKey`**: Required unique string key for this fetch, used to cache the in-flight Promise and prevent infinite re-suspension on re-render. Must match the key passed to `prefetch()` if prefetching is used.
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetch` is called automatically.
 - **`data`**: The resolved value from the fetch. The component suspends until this is available.
-- **`refreshFetch()`**: Replaces the cached Promise with a fresh one. Uses `useTransition` internally, so React keeps showing the current data while the new fetch loads — the `<Suspense>` fallback is **not** shown during refresh.
+- **`refreshFetch()`**: Replaces the cached Promise with a fresh one. Uses `useTransition` internally, so React keeps showing the current data while the new fetch loads — the `<Suspense>` fallback is **not** shown during refresh. **Requires the component to be mounted.** When an `<ErrorBoundary>` catches an API error the component is unmounted, making `refreshFetch` inaccessible. Use `fetchClient.remove(fetchKey)` instead — see [Retrying after an API error](#retrying-after-an-api-error).
 - **`isRefreshing`**: `true` while a `refreshFetch` transition is in progress. Use this to show inline loading indicators while the existing data remains visible.
 
 > **Note:** Tag strings must not contain commas.
@@ -710,6 +779,7 @@ The exported singleton instance of `FetchClient`. It centralizes the mapping bet
 class FetchClient {
   setFetchKeyToTags(fetchKey: string, promise: Promise<unknown>, tags?: string[]): void;
   invalidateTags(tags: string[]): void;
+  remove(fetchKey: string): void;
   clear(): void;
 }
 
@@ -738,9 +808,17 @@ const fetchClient: FetchClient;
   fetchClient.invalidateTags(['todos']);
   ```
 
+- **`fetchClient.remove(fetchKey)`** — removes a single entry from the promise cache without emitting any events. Use this in an `<ErrorBoundary>` reset handler to clear a rejected Promise so the next mount of the component starts a fresh fetch instead of re-throwing the cached error. See [Retrying after an API error](#retrying-after-an-api-error).
+
+  ```ts
+  import { fetchClient } from 'fetchwire';
+
+  fetchClient.remove('todos');
+  ```
+
 - **`fetchClient.setFetchKeyToTags(fetchKey, promise, tags?)`** — stores a promise in the cache under `fetchKey` and registers the tag relationships. Used internally by `useFetch`, `useFetchFn`, and `prefetch`. Exposed for advanced use cases such as a custom prefetch wrapper.
 
-> **Note:** For most application code, `fetchClient.clear()` is the only method you need to call directly.
+> **Note:** For most application code, `fetchClient.clear()` and `fetchClient.remove()` are the only methods you need to call directly.
 
 ---
 

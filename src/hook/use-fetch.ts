@@ -32,8 +32,14 @@ import { fetchClient } from '../core/fetch-client';
  *
  * @returns
  *   - `data` — the resolved value of type `T` or null.
- *   - `refreshFetch` — a function to manually trigger a new fetch. The component will re-suspend
- *     and the nearest `<Suspense>` fallback will be shown.
+ *   - `refreshFetch` — a function to manually trigger a new fetch while the component
+ *     is mounted. Uses `useTransition` internally so the current data stays visible
+ *     while the new fetch loads. **Cannot be used to retry from an ErrorBoundary**:
+ *     when the ErrorBoundary catches an API error the component is unmounted, so
+ *     `refreshFetch` is inaccessible and its internal `setPromise` state update has
+ *     no effect. To retry from an ErrorBoundary, call `fetchClient.remove(fetchKey)`
+ *     inside the boundary's reset handler before remounting the component — this
+ *     clears the rejected Promise from cache so the next mount starts a fresh fetch.
  *   - `isRefreshing` — true while a triggered refresh is in flight.
  */
 
@@ -54,7 +60,7 @@ export function useFetch<T>(
   // This assumes that the tags themselves don't contain commas.
   const tagsKey = options.tags?.join(',') ?? '';
 
-  // Why if we don't cache the promise?
+  // What if we don't cache the promise?
   // 1. Each time the Component is rendered, a new Pending Promise from fetch is created
   // 2. After use(promise) hook run, React will abort the current render, dispose all the states
   // 3. React will render the Suspense fallback.
@@ -68,7 +74,16 @@ export function useFetch<T>(
     const rawPromise = fetch()
       .then((res) => extractHttpResponseData(res))
       .catch((error) => {
-        promiseCacheStore.delete(fetchKey);
+        // Do NOT delete the resolved error-promise cache here.
+        // What if we delete the rejected promise from cache?
+        // 1. Each time the Component is rendered, a new Pending Promise from fetch is created
+        // 2. After use(promise) hook run, React will abort the current render, dispose all the states
+        // 3. React will render the Suspense fallback.
+        // 4. After the current rejected error-Promise is resolved, React will re-render the suspended component tree from scratch
+        // 5. The component will received a new Pending Promise and will suspend again.
+        // 6. The component will create an infinite loop of suspend-render-suspend-render...
+
+        // Keeping the rejected Promise in cache lets React propagate the error to the nearest ErrorBoundary on the next render.
         throw error;
       });
     const tags = tagsKey.split(',');

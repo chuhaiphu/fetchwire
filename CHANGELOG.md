@@ -1,5 +1,52 @@
 # Changelog
 
+## [4.0.1] - 2026-05-18
+
+### Fixed
+
+- **`useFetch`: infinite Suspense loop when the API returns an error**
+
+  Previously, when `wireApi` threw (e.g. 404, 500, network failure), the `.catch`
+  handler inside `useFetch` deleted the Promise from the cache and re-threw the error.
+  React detected the rejection and re-rendered the component from scratch. On that
+  re-render the cache was empty, so `useFetch` created a brand-new pending Promise
+  and immediately suspended again — triggering another fetch, another failure, and so
+  on indefinitely. The `<ErrorBoundary>` was never reached.
+
+  The fix: the `.catch` handler no longer deletes the Promise from the cache. The
+  rejected Promise stays in cache, so on the subsequent re-render React calls
+  `use(rejectedPromise)`, which throws the error synchronously to the nearest
+  `<ErrorBoundary>` instead of suspending.
+
+### Added
+
+- **`fetchClient.remove(fetchKey)` — targeted cache eviction for ErrorBoundary retry**
+
+  A new method on `fetchClient` that removes a single entry from the promise cache
+  without emitting tag events. This is the correct way to enable retry from inside
+  an `<ErrorBoundary>`: call `fetchClient.remove(fetchKey)` in the boundary's reset
+  handler before the component remounts, so the next render finds an empty cache
+  entry and starts a fresh fetch rather than re-throwing the cached rejection.
+
+  ```ts
+  // In your ErrorBoundary reset handler:
+  fetchClient.remove('todos');
+  ```
+
+  See the new [Retrying after an API error](README.md#retrying-after-an-api-error)
+  section in the README for a full example.
+
+### Documentation
+
+- Updated JSDoc for `useFetch` — `refreshFetch` now documents that it cannot be
+  used to retry from an `<ErrorBoundary>` and points to `fetchClient.remove()`.
+- Updated README: added `fetchClient.remove()` to the `fetchClient` API reference.
+- Updated README: new section **Retrying after an API error** explains the
+  `refreshFetch` limitation, the root cause, and the correct `fetchClient.remove()`
+  pattern with concrete React and React Native examples.
+
+---
+
 ## [4.0.0] - 2026-04-25
 
 ### Breaking Changes

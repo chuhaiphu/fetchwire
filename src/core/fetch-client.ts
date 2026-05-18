@@ -53,6 +53,15 @@ class FetchClient {
   }
 
   /**
+   * Remove a single fetchKey from the cache without emitting any events.
+   * Use this to clear a rejected Promise so the next render initiates a fresh fetch.
+   * @param fetchKey - The fetchKey passed to `useFetch` / `prefetch`.
+   */
+  remove(fetchKey: string) {
+    promiseCacheStore.delete(fetchKey);
+  }
+
+  /**
    * Clear all the promises in cache store and the tag to fetch keys map.
    */
   clear() {
