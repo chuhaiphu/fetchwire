@@ -1,5 +1,53 @@
 # Changelog
 
+## [4.1.1] - 2026-05-19
+
+### Fixed
+
+- **`useMutationFn`: variables silently dropped when `executeOptions` is omitted**
+
+  When a mutation function takes variables (e.g. `(id: string) => deleteApi(id)`),
+  calling `executeMutationFn(variables)` without a second argument caused the
+  variables to be misidentified as `executeOptions`, so `mutationFn` was called
+  with `undefined` instead of the provided value.
+
+  Root cause: the previous implementation used `hasTwoArgs = secondArg !== undefined`
+  to decide which overload was in effect. The TypeScript type signature marks
+  `executeOptions` as optional (`executeOptions?: ExecuteMutationOptions<T>`), so
+  callers correctly omit it — but at runtime this made the single-arg call
+  indistinguishable from a no-variable call, silently breaking the mutation:
+
+  ```ts
+  // mutationFn called with undefined instead of 'item-id-123'
+  const { executeMutationFn: deleteItem } = useMutationFn(
+    (id: string) => deleteApi(id),
+    { invalidatesTags: ['items'] },
+  );
+  deleteItem('item-id-123');          // ← looked correct in TypeScript
+                                      // ← runtime: deleteApi(undefined) 🐛
+  ```
+
+  Because `mutationFn` failed, `invalidateTags` was never reached and any
+  `useFetchFn` / `useFetch` hooks subscribed to the invalidated tags were not
+  refreshed.
+
+  Fix: replace the caller-side heuristic with `mutationFn.length > 0` — the number
+  of formal parameters declared on `mutationFn`. This is fixed at definition time
+  and correctly distinguishes the two overloads regardless of how many arguments the
+  caller passes:
+
+  - `mutationFn.length === 0` → no-variable mutation → single arg is `executeOptions`
+  - `mutationFn.length > 0` → variable mutation → first arg is `variables`, second arg is `executeOptions`
+
+  ```ts
+  // All three call forms now work correctly:
+  deleteItem('item-id-123');                              // ✓ variables only
+  deleteItem('item-id-123', { onSuccess: () => {} });    // ✓ variables + options
+  logout({ onSuccess: () => {} });                       // ✓ no-variable mutation
+  ```
+
+---
+
 ## [4.0.1] - 2026-05-18
 
 ### Fixed

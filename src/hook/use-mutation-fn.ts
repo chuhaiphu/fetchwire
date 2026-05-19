@@ -91,11 +91,17 @@ export function useMutationFn<T, TVariables = void>(
       firstArg?: TVariables | ExecuteMutationOptions<T>,
       secondArg?: ExecuteMutationOptions<T>
     ): Promise<HttpResponse<T> | null> => {
-      const hasTwoArgs = secondArg !== undefined;
-      const variables = (hasTwoArgs ? firstArg : undefined) as TVariables;
-      const executeOptions = hasTwoArgs
-        ? secondArg
-        : (firstArg as ExecuteMutationOptions<T>);
+      // Determine if the first argument is variables or execute options based on the parameters count of mutationFn
+      // Function.length returns the number of parameters defined in the function signature
+      const hasVariables = mutationFn.length > 0;
+
+      // If mutationFn expects variables, the first argument is variables and the second is execute options.
+      // If mutationFn does not expect variables, the first argument is execute options and there is no second argument.
+      // Example:
+      // executeMutationFn(variables, { onSuccess }) -> hasVariables = true
+      // executeMutationFn({ onSuccess }) -> hasVariables = false
+      const variables = (hasVariables ? firstArg : undefined) as TVariables;
+      const executeOptions = (hasVariables ? secondArg : firstArg) as ExecuteMutationOptions<T>;
 
       setState((prev) => ({ ...prev, isMutating: true }));
 
