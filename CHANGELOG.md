@@ -1,5 +1,78 @@
 # Changelog
 
+## [5.0.0] - 2026-06-20
+
+### Breaking Changes
+
+- **Removed the `onUnauthorized` and `onForbidden` interceptors; `onError` is now the single error sink.**
+
+  `WireInterceptors` previously exposed three error handlers that fired in a cascade:
+  `onUnauthorized` (for `401`), `onForbidden` (for `403`), and then `onError` for every
+  non-OK response. The status-specific handlers added an extra concept (a cascade with a
+  configurable status-code map) for something callers can express directly inside `onError`
+  by branching on `error.statusCode`. The two handlers and the cascade have been removed.
+
+  **Migration** — fold the status-specific logic into `onError`:
+
+  ```ts
+  // Before (v4)
+  initWire({
+    // ...
+    interceptors: {
+      onUnauthorized: (error) => redirectToLogin(),
+      onForbidden: (error) => showNoPermission(),
+      onError: (error) => showToast(error.message),
+    },
+  });
+
+  // After (v5)
+  initWire({
+    // ...
+    interceptors: {
+      onError: (error) => {
+        if (error.statusCode === 401) return redirectToLogin();
+        if (error.statusCode === 403) return showNoPermission();
+        showToast(error.message);
+      },
+    },
+  });
+  ```
+
+- **Removed the `unauthorizedStatusCodes` and `forbiddenStatusCodes` config options.**
+
+  These existed only to remap which status codes triggered `onUnauthorized` / `onForbidden`.
+  With those handlers gone they no longer have meaning. Decide which codes matter inside
+  `onError` by inspecting `error.statusCode`.
+
+### Added
+
+- **Per-request `skipToken` flag on `wireApi` (new `WireRequestInit` type).**
+
+  `wireApi`'s options are now `WireRequestInit` — a superset of `RequestInit` — accepting an
+  optional `skipToken`. When `true`, fetchwire does **not** call `getToken` and adds **no**
+  `Authorization` header for that request.
+
+  Its main purpose is to let the **token-refresh call go through `wireApi`** instead of a
+  hand-rolled `fetch`.
+
+  ```ts
+  export async function refreshToken(refreshToken: string) {
+    return wireApi<{ accessToken: string }>("/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refreshToken }),
+      skipToken: true,
+    });
+  }
+  ```
+
+### Changed
+
+- **Build target raised to `es2022`** (tsup). Consumers running on engines without ES2022
+  support must transpile `node_modules/fetchwire`; all current React Native / modern browser
+  targets are unaffected.
+
+---
+
 ## [4.1.0] - 2026-05-19
 
 ### Fixed
@@ -12,38 +85,32 @@
   with `undefined` instead of the provided value.
 
   Root cause: the previous implementation used `hasTwoArgs = secondArg !== undefined`
-  to decide which overload was in effect. The TypeScript type signature marks
-  `executeOptions` as optional (`executeOptions?: ExecuteMutationOptions<T>`), so
-  callers correctly omit it — but at runtime this made the single-arg call
-  indistinguishable from a no-variable call, silently breaking the mutation:
+  to decide which overload was in effect.
 
   ```ts
   // mutationFn called with undefined instead of 'item-id-123'
   const { executeMutationFn: deleteItem } = useMutationFn(
     (id: string) => deleteApi(id),
-    { invalidatesTags: ['items'] },
+    { invalidatesTags: ["items"] },
   );
-  deleteItem('item-id-123');          // ← looked correct in TypeScript
-                                      // ← runtime: deleteApi(undefined) 🐛
+  deleteItem("item-id-123"); // ← looked correct in TypeScript
+  // ← runtime: deleteApi(undefined) 🐛
   ```
 
   Because `mutationFn` failed, `invalidateTags` was never reached and any
   `useFetchFn` / `useFetch` hooks subscribed to the invalidated tags were not
   refreshed.
 
-  Fix: replace the caller-side heuristic with `mutationFn.length > 0` — the number
-  of formal parameters declared on `mutationFn`. This is fixed at definition time
-  and correctly distinguishes the two overloads regardless of how many arguments the
+  Fix: correctly distinguishes the two overloads regardless of how many arguments the
   caller passes:
-
   - `mutationFn.length === 0` → no-variable mutation → single arg is `executeOptions`
   - `mutationFn.length > 0` → variable mutation → first arg is `variables`, second arg is `executeOptions`
 
   ```ts
   // All three call forms now work correctly:
-  deleteItem('item-id-123');                              // ✓ variables only
-  deleteItem('item-id-123', { onSuccess: () => {} });    // ✓ variables + options
-  logout({ onSuccess: () => {} });                       // ✓ no-variable mutation
+  deleteItem("item-id-123"); // ✓ variables only
+  deleteItem("item-id-123", { onSuccess: () => {} }); // ✓ variables + options
+  logout({ onSuccess: () => {} }); // ✓ no-variable mutation
   ```
 
 ---
@@ -78,7 +145,7 @@
 
   ```ts
   // In your ErrorBoundary reset handler:
-  fetchClient.remove('todos');
+  fetchClient.remove("todos");
   ```
 
   See the new [Retrying after an API error](README.md#retrying-after-an-api-error)
@@ -105,13 +172,13 @@
 
   ```ts
   // Before (3.3.1):
-  prefetch('todos', () => getTodosApi());
+  prefetch("todos", () => getTodosApi());
 
   // After (4.0.0):
-  prefetch(() => getTodosApi(), { fetchKey: 'todos' });
+  prefetch(() => getTodosApi(), { fetchKey: "todos" });
 
   // With tags (also supported):
-  prefetch(() => getTodosApi(), { fetchKey: 'todos', tags: ['todos'] });
+  prefetch(() => getTodosApi(), { fetchKey: "todos", tags: ["todos"] });
   ```
 
   **Migration:** swap the argument order and move the key string into `{ fetchKey: '...' }`. Tags are now also supported directly in the `prefetch` call.
@@ -122,14 +189,14 @@
 
   ```ts
   // Before (3.3.1):
-  import { promiseCacheStore } from 'fetchwire';
+  import { promiseCacheStore } from "fetchwire";
 
   function handleLogout() {
     promiseCacheStore.clear();
   }
 
   // After (4.0.0):
-  import { fetchClient } from 'fetchwire';
+  import { fetchClient } from "fetchwire";
 
   function handleLogout() {
     fetchClient.clear();
@@ -145,11 +212,10 @@
   A new `FetchClient` class is exported as `fetchClient`. It centralizes the relationship between fetch keys, tags, and the promise cache. All hooks (`useFetch`, `useFetchFn`) and `prefetch` now go through `fetchClient` internally instead of writing to `promiseCacheStore` directly.
 
   ```ts
-  import { fetchClient } from 'fetchwire';
+  import { fetchClient } from "fetchwire";
   ```
 
   **API:**
-
   - `fetchClient.clear()` — clears all cached promises AND the internal tag-to-fetchKey map. Use this on logout so no stale data is served after the next login.
   - `fetchClient.invalidateTags(tags: string[])` — clears all cached promises whose fetch keys are associated with the given tags, then emits refresh events to all mounted hooks subscribed to those tags. Called internally by `useMutationFn`; exposed for advanced use.
   - `fetchClient.setFetchKeyToTags(fetchKey, promise, tags?)` — stores a promise in the cache and registers its tag associations. Used internally by hooks and `prefetch`; exposed for advanced use.
@@ -157,10 +223,10 @@
   **Recommended logout flow:**
 
   ```ts
-  import { fetchClient } from 'fetchwire';
+  import { fetchClient } from "fetchwire";
 
   function handleLogout() {
-    localStorage.removeItem('access_token');
+    localStorage.removeItem("access_token");
     fetchClient.clear();
   }
   ```
@@ -199,12 +265,12 @@
 
   ```ts
   // Before:
-  useFetch(getTodosApi, 'todos', { tags: ['todos'] });
-  useFetch(getTodosApi, 'todos');
+  useFetch(getTodosApi, "todos", { tags: ["todos"] });
+  useFetch(getTodosApi, "todos");
 
   // After:
-  useFetch(getTodosApi, { fetchKey: 'todos', tags: ['todos'] });
-  useFetch(getTodosApi, { fetchKey: 'todos' });
+  useFetch(getTodosApi, { fetchKey: "todos", tags: ["todos"] });
+  useFetch(getTodosApi, { fetchKey: "todos" });
   ```
 
   **Migration:** move the string you were passing as the second argument into `options.fetchKey`.
@@ -216,12 +282,12 @@
   ```ts
   // Before:
   useFetchFn(getTodosApi);
-  useFetchFn(getTodosApi, { tags: ['todos'] });
-  useFetchFn(getTodosApi, { fetchKey: 'todos', tags: ['todos'] });
+  useFetchFn(getTodosApi, { tags: ["todos"] });
+  useFetchFn(getTodosApi, { fetchKey: "todos", tags: ["todos"] });
 
   // After:
-  useFetchFn(getTodosApi, { fetchKey: 'todos' });
-  useFetchFn(getTodosApi, { fetchKey: 'todos', tags: ['todos'] });
+  useFetchFn(getTodosApi, { fetchKey: "todos" });
+  useFetchFn(getTodosApi, { fetchKey: "todos", tags: ["todos"] });
   ```
 
   **Migration:** add `fetchKey` to the options object for every `useFetchFn` call. Choose a key that uniquely identifies the resource (e.g. `'todos'`, `'user-' + userId`).
@@ -264,7 +330,7 @@
   - If `statusCode` is missing from the transformed error, fetchwire falls back to the HTTP `response.status`.
 
   ```ts
-  import { ApiError, initWire } from 'fetchwire';
+  import { ApiError, initWire } from "fetchwire";
 
   initWire({
     transformError: (error) => {
@@ -277,9 +343,9 @@
       };
 
       return new ApiError(
-        rawError.message ?? 'Unknown server error',
-        rawError.error ?? rawError.code ?? 'UNKNOWN',
-        rawError.statusCode ?? rawError.status
+        rawError.message ?? "Unknown server error",
+        rawError.error ?? rawError.code ?? "UNKNOWN",
+        rawError.statusCode ?? rawError.status,
       );
     },
   });
@@ -340,12 +406,12 @@
   ```ts
   // Before
   onRequest: (requestInit) => {
-    requestInit.headers.set('x-request-id', crypto.randomUUID());
+    requestInit.headers.set("x-request-id", crypto.randomUUID());
   };
 
   // After
   onRequest: (url, requestInit) => {
-    requestInit.headers.set('x-request-id', crypto.randomUUID());
+    requestInit.headers.set("x-request-id", crypto.randomUUID());
   };
   ```
 
@@ -375,10 +441,10 @@
   Populates `promiseCacheStore` ahead of time so that `useFetch` or `useFetchFn` (with matching `fetchKey`) can resolve instantly without a redundant network request.
 
   ```ts
-  import { prefetch } from 'fetchwire';
+  import { prefetch } from "fetchwire";
 
   // In a route loader, event handler, or anywhere before the component renders
-  prefetch('todos', () => getTodosApi());
+  prefetch("todos", () => getTodosApi());
   ```
 
   - Accepts `() => Promise<HttpResponse<T> | T>` — same flexibility as `useFetch`.
@@ -393,7 +459,7 @@
     // ...
     interceptors: {
       onRequest: (requestInit) => {
-        requestInit.headers.set('x-request-id', crypto.randomUUID());
+        requestInit.headers.set("x-request-id", crypto.randomUUID());
       },
     },
   });
@@ -407,7 +473,7 @@
   The hook now returns an additional `isRefreshing: boolean` field (powered by `useTransition`'s `isPending`) to let you show inline loading indicators without losing the existing content.
 
   ```tsx
-  const { data, refreshFetch, isRefreshing } = useFetch(getTodosApi, 'todos');
+  const { data, refreshFetch, isRefreshing } = useFetch(getTodosApi, "todos");
   ```
 
 - **`fetchKey` option in `FetchOptions`**
@@ -482,8 +548,8 @@
 
   // TodoList component
   function TodoList() {
-    const { data: todos, refreshFetch } = useFetch(getTodosApi, 'todos', {
-      tags: ['todos'],
+    const { data: todos, refreshFetch } = useFetch(getTodosApi, "todos", {
+      tags: ["todos"],
     });
 
     return (
@@ -504,10 +570,10 @@
   The `Map`-backed promise store used by `useFetch` is now exported as `promiseCacheStore`. Use it for advanced cache management — removing a specific entry to force a cold refetch, or calling `promiseCacheStore.clear()` to discard all cached Promises on logout.
 
   ```ts
-  import { promiseCacheStore } from 'fetchwire';
+  import { promiseCacheStore } from "fetchwire";
 
   // Force a cold refetch for a single key
-  promiseCacheStore.delete('todos');
+  promiseCacheStore.delete("todos");
 
   // Discard all entries on logout
   promiseCacheStore.clear();
@@ -604,14 +670,17 @@
   const updateInvoiceHelper = (updatedFields: UpdateInvoiceRequest) =>
     updateInvoiceApi(invoiceId, updatedFields);
 
-  const { executeMutationFn: updateInvoice } = useMutationFn(updateInvoiceHelper, {
-    invalidatesTags: ['organization-invoice-list'],
-  });
+  const { executeMutationFn: updateInvoice } = useMutationFn(
+    updateInvoiceHelper,
+    {
+      invalidatesTags: ["organization-invoice-list"],
+    },
+  );
 
   function handleUpdate(updatedFields: UpdateInvoiceRequest) {
     updateInvoice(updatedFields, {
       onSuccess: () => refreshInvoice(),
-      onError: (e) => Alert.alert('Lỗi', e.message),
+      onError: (e) => Alert.alert("Lỗi", e.message),
     });
   }
   ```
@@ -636,14 +705,14 @@ The APIs for `useFetchFn` and `useMutationFn` now support **automatic type infer
 // fetch helper
 // Type `Todo` is inferred from the return type of your helper (e.g. `getTodosApi`), which should be typed via `wireApi<T>`
 async function getTodosApi() {
-  return wireApi<Todo[]>('/todos', { method: 'GET' });
+  return wireApi<Todo[]>("/todos", { method: "GET" });
 }
 
 // mutation helper
 // The same as createTodoApi
 async function createTodoApi(input: { title: string }) {
-  return wireApi<Todo>('/todos', {
-    method: 'POST',
+  return wireApi<Todo>("/todos", {
+    method: "POST",
     body: JSON.stringify(input),
   });
 }
@@ -655,7 +724,7 @@ async function createTodoApi(input: { title: string }) {
 // component
 // Has to explicitly define `Todo` type in every hooks
 const { data: todos, executeFetchFn } = useFetchFn<Todo[]>({
-  tags: ['todos'],
+  tags: ["todos"],
 });
 
 useEffect(() => {
@@ -669,7 +738,7 @@ useEffect(() => {
 // component
 // Type is infered from `getTodosApi`
 const { data: todos, executeFetchFn } = useFetchFn(getTodosApi, {
-  tags: ['todos'],
+  tags: ["todos"],
 });
 
 useEffect(() => {
@@ -682,16 +751,16 @@ useEffect(() => {
 ```ts
 // component
 const { isMutating, executeMutationFn } = useMutationFn<Todo>({
-  invalidatesTags: ['todos'],
+  invalidatesTags: ["todos"],
 });
 
 function handleCreate(title: string) {
   executeMutationFn(() => createTodoApi({ title }), {
     onSuccess: () => {
-      console.log('Todo created');
+      console.log("Todo created");
     },
     onError: (error) => {
-      console.error('Create todo failed', error);
+      console.error("Create todo failed", error);
     },
   });
 }
@@ -705,17 +774,17 @@ function handleCreate(title: string) {
 const { isMutating, executeMutationFn } = useMutationFn(
   () => createTodoApi({ title }),
   {
-    invalidatesTags: ['todos'],
-  }
+    invalidatesTags: ["todos"],
+  },
 );
 
 function handleCreate(title: string) {
   executeMutationFn({
     onSuccess: () => {
-      console.log('Todo created');
+      console.log("Todo created");
     },
     onError: (error) => {
-      console.error('Create todo failed', error);
+      console.error("Create todo failed", error);
     },
   });
 }

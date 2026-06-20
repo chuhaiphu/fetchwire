@@ -8,4 +8,5 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   external: ['react'],
+  target: 'es2022',
 });

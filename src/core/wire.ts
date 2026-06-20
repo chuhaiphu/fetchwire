@@ -1,37 +1,45 @@
-import { HttpResponse } from '../interface';
-import { ApiError } from '../util/api-error';
-import { getWireConfig } from './config';
+import { HttpResponse, WireRequestInit } from "../interface";
+import { ApiError } from "../util/api-error";
+import { getWireConfig } from "./config";
 
 /**
  * Sends an API request and returns the response.
  * @param endpoint - The API endpoint to call. Example: '/api/v1/users'.
- * @param options - The request options is a RequestInit object.
+ * @param options - The request options: a `RequestInit` plus optional fetchwire flags
+ *   (e.g. `skipToken` to send the request without an `Authorization` header).
  */
 export async function wireApi<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: WireRequestInit = {},
 ): Promise<HttpResponse<T>> {
+  // Split fetchwire-specific flags off so only standard RequestInit reaches fetch/onRequest.
+  const { skipToken, ...requestInit } = options;
   const config = getWireConfig();
   const url = `${config.baseUrl}${endpoint}`;
-  const accessToken = await config.getToken();
+  // `skipToken` requests never touch getToken — this is what lets the token-refresh call
+  // itself go through wireApi without recursing into the refresh it is performing.
+  const accessToken = skipToken ? null : await config.getToken();
 
-  const isFormData = options.body instanceof FormData;
+  const isFormData = requestInit.body instanceof FormData;
   const headers = new Headers({
     ...config.headers,
     ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    ...options.headers,
+    ...requestInit.headers,
   });
-  if (!isFormData && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
+  if (!isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
   }
 
-  // Build the final RequestInit object to allow interceptors to modify it before the request is sent.
+  // Build ONE request object and share its reference with both the interceptor and fetch.
   // ---
-  // If we pass original ({...options, headers}) directly to function onRequest, fetch, etc.,
-  // A brand new RequestInit object will be created each time we spread options,
-  // Thus make any modification in the interceptor (e.g. adding a header) not work as expected because the modified RequestInit object is not used in the fetch function.
+  // Why use a shared variable instead of spreading inline at each function:
+  // `onRequest` lets callers mutate the request before it is sent (e.g. add a header).
+  // Mutation only works if the interceptor and fetch point to the SAME object.
+  // Spreading `{ ...options, headers }` at each function (onRequest, fetch)
+  // would create a separate object per call, so the interceptor would mutate one object
+  // while fetch sends a different one — the change would be silently lost.
   const finalRequestConfig: RequestInit = {
-    ...options,
+    ...requestInit,
     headers,
   };
 
@@ -50,7 +58,10 @@ export async function wireApi<T>(
       try {
         errorResponseJson = await response.json();
       } catch {
-        errorResponseJson = { message: 'Unknown server error', error: 'UNKNOWN' };
+        errorResponseJson = {
+          message: "Unknown server error",
+          error: "UNKNOWN",
+        };
       }
 
       let apiError: ApiError;
@@ -67,29 +78,11 @@ export async function wireApi<T>(
           errorResponseJson.error,
           errorResponseJson.statusCode ??
             errorResponseJson.status ??
-            response.status
+            response.status,
         );
       }
 
-      // Resolve effective status-code mappings with default values
-      const unauthorizedStatusCodes =
-        config.unauthorizedStatusCodes && config.unauthorizedStatusCodes.length > 0
-          ? config.unauthorizedStatusCodes
-          : [401];
-
-      const forbiddenStatusCodes =
-        config.forbiddenStatusCodes && config.forbiddenStatusCodes.length > 0
-          ? config.forbiddenStatusCodes
-          : [403];
-
-      // Trigger interceptors based on configured status codes.
-      // Cascade behavior: specific handlers (onUnauthorized / onForbidden) fire
-      // first, then onError always fires for every non-OK response.
-      if (unauthorizedStatusCodes.includes(response.status)) {
-        await config.interceptors?.onUnauthorized?.(apiError);
-      } else if (forbiddenStatusCodes.includes(response.status)) {
-        await config.interceptors?.onForbidden?.(apiError);
-      }
+      // Notify the single global error sink for every non-OK response.
       await config.interceptors?.onError?.(apiError);
 
       throw apiError;
@@ -105,14 +98,14 @@ export async function wireApi<T>(
     return {
       data: jsonResponse.data ?? jsonResponse,
       status: jsonResponse.status ?? jsonResponse.statusCode ?? response.status,
-      message: jsonResponse.message ?? '',
+      message: jsonResponse.message ?? "",
     };
   } catch (error) {
     if (error instanceof ApiError) throw error;
     throw new ApiError(
-      error instanceof Error ? error.message : 'Network error',
-      'NETWORK_ERROR',
-      520
+      error instanceof Error ? error.message : "Network error",
+      "NETWORK_ERROR",
+      520,
     );
   }
 }

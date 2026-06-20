@@ -1,4 +1,4 @@
-import { ApiError } from '../util/api-error';
+import { ApiError } from "../util/api-error";
 
 /**
  * Standard HTTP response shape used by fetchwire.
@@ -47,29 +47,7 @@ export interface WireInterceptors {
   onResponse?: (url: string, response: Response) => void | Promise<void>;
 
   /**
-   * Called when a response matches `unauthorizedStatusCodes` (default: 401).
-   *
-   * Fires **before** `onError`. After this handler completes, `onError` will
-   * also fire (cascade behavior) — useful when you want both specific auth
-   * handling and a global error notification.
-   */
-  onUnauthorized?: (error: ApiError) => void | Promise<void>;
-
-  /**
-   * Called when a response matches `forbiddenStatusCodes` (default: 403).
-   *
-   * Fires **before** `onError`. After this handler completes, `onError` will
-   * also fire (cascade behavior) — useful when you want both specific permission
-   * handling and a global error notification.
-   */
-  onForbidden?: (error: ApiError) => void | Promise<void>;
-
-  /**
-   * Called for **every** non-OK response, including those already handled by
-   * `onUnauthorized` or `onForbidden` (cascade behavior).
-   *
-   * Use this as a global error sink — e.g. to show a toast notification for
-   * all API errors regardless of their specific status code.
+   * Called for **every** non-OK response (the single global error sink).
    */
   onError?: (error: ApiError) => void | Promise<void>;
 }
@@ -106,7 +84,7 @@ export interface WireConfig {
    * standardized `ApiError` shape.
    *
    * If not provided, fetchwire will assume the error response has the standard structure
-   * 
+   *
    * `{ message: string, error: string, statusCode: number }`.
    */
   transformError?: (error: unknown) => ApiError;
@@ -119,21 +97,19 @@ export interface WireConfig {
   transformResponse?: (json: unknown) => HttpResponse<unknown>;
 
   /**
-   * Optional global interceptors to handle unauthorized/forbidden/other errors.
+   * Optional global interceptors for the request/response lifecycle and errors.
    */
   interceptors?: WireInterceptors;
+}
 
+/**
+ * Per-request options accepted by `wireApi`. A superset of the standard `RequestInit`.
+ */
+export interface WireRequestInit extends RequestInit {
   /**
-   * HTTP status codes that should be treated as "unauthorized" for the purpose
-   * of calling `interceptors.onUnauthorized`. Defaults to `[401]` when omitted.
+   * When `true`, fetchwire does **not** call `getToken` and adds **no** `Authorization` header.
    */
-  unauthorizedStatusCodes?: number[];
-
-  /**
-   * HTTP status codes that should be treated as "forbidden" for the purpose
-   * of calling `interceptors.onForbidden`. Defaults to `[403]` when omitted.
-   */
-  forbiddenStatusCodes?: number[];
+  skipToken?: boolean;
 }
 
 /**

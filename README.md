@@ -9,13 +9,6 @@ A lightweight, focused API fetching library for **React / React Native+** applic
 - Deliver a smooth, non-blocking data-fetching experience.
 - Eliminating loading waterfalls and making the UI feel instant.
 
-## Version note
-
-If you only need regular fetching (non-Suspense) or your project is on **React 18 or below**, use **fetchwire v2.3.1**.
-
-- Docs/package link: https://www.npmjs.com/package/fetchwire/v/2.3.1
-- Install: `npm install fetchwire@2.3.1`
-
 ### When to use fetchwire
 
 - **React / React Native** that:
@@ -41,7 +34,8 @@ If you find **fetchwire** helpful and want to support its development, you can b
 
 - **Global API fetching configuration `initWire`**
   - Configure `baseUrl`, default headers, and how to read the auth token.
-  - Optionally register global interceptors for 401/403/other errors.
+  - Register a single global `onError` interceptor for every non-OK response (branch on `error.statusCode` to handle 401/403/etc).
+  - Per-request `skipToken` flag on `wireApi` to send a request without an `Authorization` header (e.g. the token-refresh call, login).
   - `onRequest` interceptor — called before every request with the full URL and `RequestInit`.
   - `onResponse` interceptor — called after every response, before the body is parsed.
   - Optional `transformError` function to normalize server error payloads into `ApiError`.
@@ -90,18 +84,18 @@ Call `initWire` once, as early as possible in your app lifecycle.
 
 ```ts
 // src/api/wire.ts
-import { ApiError, initWire } from 'fetchwire';
+import { ApiError, initWire } from "fetchwire";
 
 export function setupWire() {
   initWire({
-    baseUrl: 'https://api.example.com',
+    baseUrl: "https://api.example.com",
     headers: {
-      'x-client': 'web',
+      "x-client": "web",
     },
     getToken: async () => {
       // Called on each request — return the current access token or null.
       // Read token from localStorage (or any storage you prefer)
-      return localStorage.getItem('access_token');
+      return localStorage.getItem("access_token");
     },
     // Optional: transform response
     transformResponse(res) {
@@ -113,7 +107,7 @@ export function setupWire() {
       return {
         status: rawResponse.statusCode,
         data: rawResponse.data,
-        message: rawResponse.message || '',
+        message: rawResponse.message || "",
       };
     },
     // Optional: transform error response
@@ -126,40 +120,30 @@ export function setupWire() {
         status?: number;
       };
       return new ApiError(
-        rawError.message ?? 'Unknown server error',
-        rawError.error ?? rawError.code ?? 'UNKNOWN',
-        rawError.statusCode ?? rawError.status
+        rawError.message ?? "Unknown server error",
+        rawError.error ?? rawError.code ?? "UNKNOWN",
+        rawError.statusCode ?? rawError.status,
       );
     },
-    // Optional: customize which status codes should trigger auth interceptors
-    unauthorizedStatusCodes: [401, 419], // defaults to [401] if omitted
-    forbiddenStatusCodes: [403], // defaults to [403] if omitted
     interceptors: {
       onRequest: (url, requestInit) => {
         // Called before every request.
         // url is the full URL (baseUrl + endpoint), e.g. "https://api.example.com/todos"
         // Mutations to requestInit are reflected in the actual request.
-        console.log(`→ ${requestInit.method ?? 'GET'} ${url}`);
-        requestInit.headers.set('x-request-id', crypto.randomUUID());
+        console.log(`→ ${requestInit.method ?? "GET"} ${url}`);
+        requestInit.headers.set("x-request-id", crypto.randomUUID());
       },
       onResponse: (url, response) => {
         // Called after every response, before the body is parsed.
         // Do not call response.json() / response.text() here — use response.clone() if needed.
         console.log(`← ${response.status} ${url}`);
       },
-      onUnauthorized: (error) => {
-        // Called when response status matches unauthorizedStatusCodes (default: 401).
-        // onError will also fire after this (cascade behavior).
-        // e.g. redirect to login, clear token, etc.
-      },
-      onForbidden: (error) => {
-        // Called when response status matches forbiddenStatusCodes (default: 403).
-        // onError will also fire after this (cascade behavior).
-        // e.g. show "no permission" message
-      },
       onError: (error) => {
-        // Called for EVERY non-OK response, including 401 and 403.
-        // e.g. show a global toast notification
+        // Called for EVERY non-OK response — the single error sink.
+        // Branch on error.statusCode to handle specific cases:
+        //   if (error.statusCode === 401) // redirect to login, clear token
+        //   else if (error.statusCode === 403) // show "no permission"
+        //   else // show a global toast notification
       },
     },
   });
@@ -168,17 +152,17 @@ export function setupWire() {
 
 ```tsx
 // src/main.tsx or src/index.tsx
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App';
-import { setupWire } from './api/wire';
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import { setupWire } from "./api/wire";
 
 setupWire();
 
-ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App />
-  </React.StrictMode>
+  </React.StrictMode>,
 );
 ```
 
@@ -194,7 +178,7 @@ A common pattern is to define small API helper functions in `src/api/*` that wra
 
 ```ts
 // src/api/todo-api.ts
-import { wireApi } from 'fetchwire';
+import { wireApi } from "fetchwire";
 
 export type Todo = {
   id: string;
@@ -203,25 +187,25 @@ export type Todo = {
 };
 
 export async function getTodosApi() {
-  return wireApi<Todo[]>('/todos', { method: 'GET' });
+  return wireApi<Todo[]>("/todos", { method: "GET" });
 }
 
 export async function createTodoApi(input: { title: string }) {
-  return wireApi<Todo>('/todos', {
-    method: 'POST',
+  return wireApi<Todo>("/todos", {
+    method: "POST",
     body: JSON.stringify(input),
   });
 }
 
 export async function toggleTodoApi(id: string) {
   return wireApi<Todo>(`/todos/${id}/toggle`, {
-    method: 'POST',
+    method: "POST",
   });
 }
 
 export async function deleteTodoApi(id: string) {
   return wireApi<null>(`/todos/${id}`, {
-    method: 'DELETE',
+    method: "DELETE",
   });
 }
 ```
@@ -245,9 +229,9 @@ You can organize similar helpers for users, invoices, organizations, uploads, et
 
 ```tsx
 // src/components/TodoList.tsx
-import { Suspense } from 'react';
-import { useFetch } from 'fetchwire';
-import { getTodosApi } from '../api/todo-api';
+import { Suspense } from "react";
+import { useFetch } from "fetchwire";
+import { getTodosApi } from "../api/todo-api";
 
 // Parent: wrap with Suspense + ErrorBoundary
 export function TodoPage() {
@@ -266,19 +250,19 @@ function TodoList() {
     refreshFetch,
     isRefreshing,
   } = useFetch(getTodosApi, {
-    fetchKey: 'todos',
-    tags: ['todos'],
+    fetchKey: "todos",
+    tags: ["todos"],
   });
 
   return (
     <div>
       <button onClick={refreshFetch} disabled={isRefreshing}>
-        {isRefreshing ? 'Refreshing...' : 'Refresh'}
+        {isRefreshing ? "Refreshing..." : "Refresh"}
       </button>
       <ul>
         {todos.map((todo) => (
           <li key={todo.id}>
-            {todo.title} {todo.completed ? '(done)' : ''}
+            {todo.title} {todo.completed ? "(done)" : ""}
           </li>
         ))}
       </ul>
@@ -309,9 +293,9 @@ Example: loading and refreshing a todo list in a React component:
 
 ```tsx
 // src/components/TodoList.tsx
-import { useEffect } from 'react';
-import { useFetchFn } from 'fetchwire';
-import { getTodosApi, type Todo } from '../api/todo-api';
+import { useEffect } from "react";
+import { useFetchFn } from "fetchwire";
+import { getTodosApi, type Todo } from "../api/todo-api";
 
 export function TodoList() {
   const {
@@ -322,8 +306,8 @@ export function TodoList() {
     executeFetchFn: fetchTodos,
     refreshFetchFn: refreshTodos,
   } = useFetchFn(getTodosApi, {
-    fetchKey: 'todos',
-    tags: ['todos'],
+    fetchKey: "todos",
+    tags: ["todos"],
   });
 
   useEffect(() => {
@@ -336,13 +320,13 @@ export function TodoList() {
   return (
     <div>
       <button onClick={() => refreshTodos()} disabled={isRefreshing}>
-        {isRefreshing ? 'Refreshing...' : 'Refresh'}
+        {isRefreshing ? "Refreshing..." : "Refresh"}
       </button>
 
       <ul>
         {(todos ?? []).map((todo) => (
           <li key={todo.id}>
-            {todo.title} {todo.completed ? '(done)' : ''}
+            {todo.title} {todo.completed ? "(done)" : ""}
           </li>
         ))}
       </ul>
@@ -379,41 +363,39 @@ Example: creating and toggling todos with `useMutationFn`:
 
 ```tsx
 // src/components/TodoActions.tsx
-import { FormEvent, useState } from 'react';
-import { useMutationFn } from 'fetchwire';
+import { FormEvent, useState } from "react";
+import { useMutationFn } from "fetchwire";
 import {
   createTodoApi,
   toggleTodoApi,
   deleteTodoApi,
   type Todo,
-} from '../api/todo-api';
+} from "../api/todo-api";
 
 export function TodoActions() {
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState("");
 
-  const { isMutating: isCreating, executeMutationFn: createTodo } = useMutationFn(
-    () => createTodoApi({ title }),
-    {
-      invalidatesTags: ['todos'],
-    }
-  );
+  const { isMutating: isCreating, executeMutationFn: createTodo } =
+    useMutationFn(() => createTodoApi({ title }), {
+      invalidatesTags: ["todos"],
+    });
 
-  const { isMutating: isToggling, executeMutationFn: toggleTodo } = useMutationFn(
-    (id: string) => toggleTodoApi(id),
-    { invalidatesTags: ['todos'] }
-  );
+  const { isMutating: isToggling, executeMutationFn: toggleTodo } =
+    useMutationFn((id: string) => toggleTodoApi(id), {
+      invalidatesTags: ["todos"],
+    });
 
-  const { isMutating: isDeleting, executeMutationFn: deleteTodo } = useMutationFn(
-    (id: string) => deleteTodoApi(id),
-    { invalidatesTags: ['todos'] }
-  );
+  const { isMutating: isDeleting, executeMutationFn: deleteTodo } =
+    useMutationFn((id: string) => deleteTodoApi(id), {
+      invalidatesTags: ["todos"],
+    });
 
   const handleCreate = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
     createTodo({
-      onSuccess: () => setTitle(''),
+      onSuccess: () => setTitle(""),
     });
   };
 
@@ -429,7 +411,7 @@ export function TodoActions() {
         placeholder="New todo"
       />
       <button type="submit" disabled={isCreating}>
-        {isCreating ? 'Adding...' : 'Add'}
+        {isCreating ? "Adding..." : "Add"}
       </button>
     </form>
   );
@@ -459,12 +441,12 @@ This pattern keeps your code explicit and small, without introducing a full quer
 `prefetch` lets you start loading data before a component mounts — for example in a route loader, an event handler, or during page navigation. The fetched Promise is stored in the internal cache via `fetchClient`, so when the component renders with a matching key, it resolves instantly without a duplicate request.
 
 ```tsx
-import { prefetch } from 'fetchwire';
-import { getTodosApi } from '../api/todo-api';
+import { prefetch } from "fetchwire";
+import { getTodosApi } from "../api/todo-api";
 
 // In a route loader or link hover handler
 function onNavigateToTodos() {
-  prefetch(() => getTodosApi(), { fetchKey: 'todos' });
+  prefetch(() => getTodosApi(), { fetchKey: "todos" });
 
   // Optionally include tags — registered for invalidation alongside useFetch/useFetchFn:
   // prefetch(() => getTodosApi(), { fetchKey: 'todos', tags: ['todos'] });
@@ -476,14 +458,14 @@ When the component renders:
 ```tsx
 // useFetch — uses the same fetchKey, resolves from cache
 const { data: todos } = useFetch(getTodosApi, {
-  fetchKey: 'todos',
-  tags: ['todos'],
+  fetchKey: "todos",
+  tags: ["todos"],
 });
 
 // useFetchFn — uses the same fetchKey, resolves from cache on first executeFetchFn()
 const { data: todos, executeFetchFn } = useFetchFn(getTodosApi, {
-  fetchKey: 'todos',
-  tags: ['todos'],
+  fetchKey: "todos",
+  tags: ["todos"],
 });
 ```
 
@@ -546,14 +528,14 @@ All errors are normalized to an `ApiError` instance. It extends `Error` and typi
 **With `useFetchFn`** — read the `error` field directly from the hook state:
 
 ```tsx
-const { error } = useFetchFn(getTodosApi, { fetchKey: 'todos' });
+const { error } = useFetchFn(getTodosApi, { fetchKey: "todos" });
 if (error) return <div>Error: {error.message}</div>;
 ```
 
 **With `useMutationFn`** — handle errors with `onError`:
 
 ```tsx
-import { ApiError } from 'fetchwire';
+import { ApiError } from "fetchwire";
 
 // No variables: pass only options
 executeMutationFn({
@@ -561,7 +543,7 @@ executeMutationFn({
     /* success logic */
   },
   onError: (error: ApiError) => {
-    Alert.alert('Login failed', error.message || 'Unexpected error');
+    Alert.alert("Login failed", error.message || "Unexpected error");
   },
 });
 
@@ -592,10 +574,10 @@ executeMutationFn(payload, {
 `fetchClient.remove(fetchKey)` deletes the rejected Promise from the cache without emitting any tag events. It works independently of whether the component is mounted. Call it in your `<ErrorBoundary>`'s reset handler **before** the component remounts, so the next render finds an empty cache entry and starts a fresh fetch.
 
 ```tsx
-import { fetchClient } from 'fetchwire';
+import { fetchClient } from "fetchwire";
 
 // React (web) example using react-error-boundary
-import { ErrorBoundary } from 'react-error-boundary';
+import { ErrorBoundary } from "react-error-boundary";
 
 function TodoPage() {
   return (
@@ -610,7 +592,7 @@ function TodoPage() {
         // Clear the rejected Promise from cache before the component remounts.
         // Without this, the next mount finds the same rejected Promise and
         // immediately throws again — the ErrorBoundary would loop forever.
-        fetchClient.remove('todos');
+        fetchClient.remove("todos");
       }}
     >
       <Suspense fallback={<div>Loading…</div>}>
@@ -623,7 +605,7 @@ function TodoPage() {
 
 ```tsx
 // React Native example (custom ErrorBoundary with a resetKeys prop or similar)
-import { fetchClient } from 'fetchwire';
+import { fetchClient } from "fetchwire";
 
 function WageDetailPage({ wageId }: { wageId: string }) {
   const fetchKey = `receipt-payment-list-in-wage-${wageId}`;
@@ -655,8 +637,6 @@ function WageDetailPage({ wageId }: { wageId: string }) {
 type WireInterceptors = {
   onRequest?: (url: string, options: RequestInit) => void | Promise<void>;
   onResponse?: (url: string, response: Response) => void | Promise<void>;
-  onUnauthorized?: (error: ApiError) => void | Promise<void>;
-  onForbidden?: (error: ApiError) => void | Promise<void>;
   onError?: (error: ApiError) => void | Promise<void>;
 };
 
@@ -671,8 +651,6 @@ type WireConfig = {
     status?: number;
   };
   interceptors?: WireInterceptors;
-  unauthorizedStatusCodes?: number[];
-  forbiddenStatusCodes?: number[];
 };
 
 function initWire(config: WireConfig): void;
@@ -684,13 +662,9 @@ function initWire(config: WireConfig): void;
 - **`interceptors`** (optional):
   - `onRequest(url, options)`: Called before every request with the full URL and final `RequestInit`. Modify headers, inject tracing IDs, or log outgoing requests. Can be async.
   - `onResponse(url, response)`: Called after every response, before the body is parsed. Use for logging, timing, or header inspection. Do not consume the response body — use `response.clone()` if needed. Can be async.
-  - `onUnauthorized(error)`: Called when a response matches `unauthorizedStatusCodes`. Fires before `onError` (cascade — `onError` also fires). Can be async.
-  - `onForbidden(error)`: Called when a response matches `forbiddenStatusCodes`. Fires before `onError` (cascade — `onError` also fires). Can be async.
-  - `onError(error)`: Called for **every** non-OK response, including 401 and 403. Use as a global error sink (e.g. show a toast). Can be async.
-- **`transformError`** (optional): A function to normalize your backend error payload into an `ApiError` (`message`, `errorCode`, `statusCode`). Called on non-OK responses before interceptors (`onUnauthorized`, `onForbidden`, `onError`) are executed.
+  - `onError(error)`: Called for **every** non-OK response — the single error sink. Branch on `error.statusCode` to handle specific cases (e.g. `401` → redirect to login, `403` → show "no permission", else → show a toast). Can be async.
+- **`transformError`** (optional): A function to normalize your backend error payload into an `ApiError` (`message`, `errorCode`, `statusCode`). Called on non-OK responses before the `onError` interceptor is executed.
 - **`transformResponse`** (optional): A function to normalize your API's response shape into fetchwire's standard `{ data?, message?, status? }` format. Useful when your backend uses a different envelope (e.g. `statusCode` instead of `status`). Called on every successful response before the data reaches your hooks.
-- **`unauthorizedStatusCodes`** (optional): List of HTTP status codes that should be treated as unauthorized (defaults to `[401]`).
-- **`forbiddenStatusCodes`** (optional): List of HTTP status codes that should be treated as forbidden (defaults to `[403]`).
 
 ### `updateWireConfig(configPartial)`
 
@@ -719,23 +693,35 @@ function getWireConfig(): WireConfig;
 ### `wireApi<T>(endpoint, options?)`
 
 ```ts
+type WireRequestInit = RequestInit & {
+  skipToken?: boolean;
+};
+
 async function wireApi<T>(
   endpoint: string,
-  options?: RequestInit
+  options?: WireRequestInit,
 ): Promise<HttpResponse<T>>;
 ```
 
 - **`endpoint`**: Path relative to `baseUrl`, e.g. `'/invoice'`.
-- **`options`**: Standard `fetch` options (method, body, headers, etc).
+- **`options`**: Standard `fetch` options (method, body, headers, etc), plus:
+  - **`skipToken`** (optional, default `false`): When `true`, fetchwire does **not** call `getToken` and sends **no** `Authorization` header for this request. Use it for endpoints that must run unauthenticated.
 - **Return value**: Resolves to the parsed JSON body in the standard shape `{ data?: T; message?: string; status?: number }`.
 - **Errors**: Throws `ApiError` on non-OK responses or network issues.
 
 Usage:
 
 ```ts
-const result = await wireApi<UserResponse>('/user/me', { method: 'GET' });
+const result = await wireApi<UserResponse>("/user/me", { method: "GET" });
 // result.data is your typed data
 // result.message and result.status are available if your backend provides them
+
+// Token refresh:
+const refreshed = await wireApi<{ accessToken: string }>("/auth/refresh", {
+  method: "POST",
+  body: JSON.stringify({ refreshToken }),
+  skipToken: true,
+});
 ```
 
 ---
@@ -750,7 +736,7 @@ type FetchOptions = {
 
 function useFetch<T>(
   fetch: () => Promise<HttpResponse<T> | T>,
-  options: FetchOptions
+  options: FetchOptions,
 ): {
   data: T | null;
   refreshFetch: () => void;
@@ -777,7 +763,11 @@ The exported singleton instance of `FetchClient`. It centralizes the mapping bet
 
 ```ts
 class FetchClient {
-  setFetchKeyToTags(fetchKey: string, promise: Promise<unknown>, tags?: string[]): void;
+  setFetchKeyToTags(
+    fetchKey: string,
+    promise: Promise<unknown>,
+    tags?: string[],
+  ): void;
   invalidateTags(tags: string[]): void;
   remove(fetchKey: string): void;
   clear(): void;
@@ -791,10 +781,10 @@ const fetchClient: FetchClient;
 - **`fetchClient.clear()`** — removes all entries from the promise cache and resets the tag-to-fetchKey map. Call this on logout so no stale cached data persists into the next session.
 
   ```ts
-  import { fetchClient } from 'fetchwire';
+  import { fetchClient } from "fetchwire";
 
   function handleLogout() {
-    localStorage.removeItem('access_token');
+    localStorage.removeItem("access_token");
     fetchClient.clear();
   }
   ```
@@ -802,18 +792,18 @@ const fetchClient: FetchClient;
 - **`fetchClient.invalidateTags(tags)`** — for each tag, deletes all associated cached promises and emits refresh events to any currently-mounted `useFetch` / `useFetchFn` hooks subscribed to those tags. Called automatically by `useMutationFn` after a successful mutation; exposed for advanced scenarios where you need to trigger invalidation imperatively (e.g. after a WebSocket push).
 
   ```ts
-  import { fetchClient } from 'fetchwire';
+  import { fetchClient } from "fetchwire";
 
   // Imperatively invalidate a tag
-  fetchClient.invalidateTags(['todos']);
+  fetchClient.invalidateTags(["todos"]);
   ```
 
 - **`fetchClient.remove(fetchKey)`** — removes a single entry from the promise cache without emitting any events. Use this in an `<ErrorBoundary>` reset handler to clear a rejected Promise so the next mount of the component starts a fresh fetch instead of re-throwing the cached error. See [Retrying after an API error](#retrying-after-an-api-error).
 
   ```ts
-  import { fetchClient } from 'fetchwire';
+  import { fetchClient } from "fetchwire";
 
-  fetchClient.remove('todos');
+  fetchClient.remove("todos");
   ```
 
 - **`fetchClient.setFetchKeyToTags(fetchKey, promise, tags?)`** — stores a promise in the cache under `fetchKey` and registers the tag relationships. Used internally by `useFetch`, `useFetchFn`, and `prefetch`. Exposed for advanced use cases such as a custom prefetch wrapper.
@@ -827,7 +817,7 @@ const fetchClient: FetchClient;
 ```ts
 function prefetch<T>(
   fetchFn: () => Promise<HttpResponse<T> | T>,
-  options: FetchOptions
+  options: FetchOptions,
 ): Promise<unknown> | undefined;
 ```
 
@@ -839,14 +829,14 @@ Pre-populates the internal promise cache (via `fetchClient`) with the result of 
 - **Returns**: The cached or newly created Promise. If a Promise already exists for `fetchKey`, the existing one is returned — no duplicate fetch.
 
 ```ts
-import { prefetch } from 'fetchwire';
-import { getTodosApi } from './api/todo-api';
+import { prefetch } from "fetchwire";
+import { getTodosApi } from "./api/todo-api";
 
 // Call in a route loader, link hover, or before navigating
-prefetch(() => getTodosApi(), { fetchKey: 'todos' });
+prefetch(() => getTodosApi(), { fetchKey: "todos" });
 
 // With tags (recommended if you also use tags in useFetch/useFetchFn):
-prefetch(() => getTodosApi(), { fetchKey: 'todos', tags: ['todos'] });
+prefetch(() => getTodosApi(), { fetchKey: "todos", tags: ["todos"] });
 ```
 
 ---
@@ -861,7 +851,7 @@ type FetchOptions = {
 
 function useFetchFn<T>(
   fetchFn: () => Promise<HttpResponse<T>>,
-  options: FetchOptions
+  options: FetchOptions,
 ): {
   data: T | null;
   isLoading: boolean;
@@ -901,12 +891,12 @@ type ExecuteMutationOptions<T> = {
 // No variables: mutationFn has no parameters
 function useMutationFn<T>(
   mutationFn: () => Promise<HttpResponse<T>>,
-  options?: MutationOptions
+  options?: MutationOptions,
 ): {
   data: T | null;
   isMutating: boolean;
   executeMutationFn: (
-    executeOptions?: ExecuteMutationOptions<T>
+    executeOptions?: ExecuteMutationOptions<T>,
   ) => Promise<HttpResponse<T> | null>;
   reset: () => void;
 };
@@ -914,13 +904,13 @@ function useMutationFn<T>(
 // With variables: mutationFn accepts one argument (e.g. update payload)
 function useMutationFn<T, TVariables>(
   mutationFn: (variables: TVariables) => Promise<HttpResponse<T>>,
-  options?: MutationOptions
+  options?: MutationOptions,
 ): {
   data: T | null;
   isMutating: boolean;
   executeMutationFn: (
     variables: TVariables,
-    executeOptions?: ExecuteMutationOptions<T>
+    executeOptions?: ExecuteMutationOptions<T>,
   ) => Promise<HttpResponse<T> | null>;
   reset: () => void;
 };
