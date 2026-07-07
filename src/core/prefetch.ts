@@ -14,6 +14,6 @@ export function prefetch<T>(
 
   // Otherwise, execute the fetch function and store in the cacheMap then return it
   const promise = fetchFn().then((res) => extractHttpResponseData(res));
-  fetchClient.setFetchKeyToTags(options.fetchKey, promise, options?.tags);
+  fetchClient.cachePromiseAndRegisterTags(options.fetchKey, promise, options?.tags);
   return promise;
 }

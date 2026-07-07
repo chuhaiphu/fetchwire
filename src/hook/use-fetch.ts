@@ -1,9 +1,9 @@
-import { useEffect, useCallback, use, useState, useTransition } from 'react';
-import { HttpResponse, FetchOptions } from '../interface';
-import { eventEmitter } from '../core/event-emitter';
-import { promiseCacheStore } from '../core/promise-cache-store';
-import { extractHttpResponseData } from '../util/helper';
-import { fetchClient } from '../core/fetch-client';
+import { useEffect, useCallback, use, useState, useTransition } from "react";
+import { HttpResponse, FetchOptions } from "../interface";
+import { eventEmitter } from "../core/event-emitter";
+import { promiseCacheStore } from "../core/promise-cache-store";
+import { extractHttpResponseData } from "../util/helper";
+import { fetchClient } from "../core/fetch-client";
 
 /**
  * A hook that fetches immediately on mount and suspends
@@ -45,7 +45,7 @@ import { fetchClient } from '../core/fetch-client';
 
 export function useFetch<T>(
   fetch: () => Promise<HttpResponse<T> | T>,
-  options: FetchOptions
+  options: FetchOptions,
 ): {
   data: T | null;
   refreshFetch: () => void;
@@ -58,7 +58,7 @@ export function useFetch<T>(
   // So we need to create a string key for it by stringifying from options.tags.
   // We can use JSON.stringify, but it can be slow for large arrays, so we can use join instead.
   // This assumes that the tags themselves don't contain commas.
-  const tagsKey = options.tags?.join(',') ?? '';
+  const tagsKey = options.tags?.join(",") ?? "";
 
   // What if we don't cache the promise?
   // 1. Each time the Component is rendered, a new Pending Promise from fetch is created
@@ -86,21 +86,23 @@ export function useFetch<T>(
         // Keeping the rejected Promise in cache lets React propagate the error to the nearest ErrorBoundary on the next render.
         throw error;
       });
-    const tags = tagsKey.split(',');
-    fetchClient.setFetchKeyToTags(fetchKey, rawPromise, tags);
+    const tags = tagsKey.split(",");
+    fetchClient.cachePromiseAndRegisterTags(fetchKey, rawPromise, tags);
+  } else {
+    fetchClient.registerTags(fetchKey, tagsKey.split(","));
   }
 
   // Get the cached promise
   const [promise, setPromise] = useState<Promise<T | undefined>>(
-    () => promiseCacheStore.get(fetchKey) as Promise<T>
+    () => promiseCacheStore.get(fetchKey) as Promise<T>,
   );
 
   const [isPending, startTransition] = useTransition();
 
   const refreshFetch = useCallback(() => {
     const newPromise = fetch().then((res) => extractHttpResponseData(res));
-    const tags = tagsKey.split(',');
-    fetchClient.setFetchKeyToTags(fetchKey, newPromise, tags);
+    const tags = tagsKey.split(",");
+    fetchClient.cachePromiseAndRegisterTags(fetchKey, newPromise, tags);
     startTransition(() => {
       setPromise(newPromise);
     });
@@ -108,9 +110,9 @@ export function useFetch<T>(
 
   useEffect(() => {
     if (!tagsKey) return;
-    const tags = tagsKey.split(',');
+    const tags = tagsKey.split(",");
     const subscriptions = tags.map((tag) =>
-      eventEmitter.addListener(tag, refreshFetch)
+      eventEmitter.addListener(tag, refreshFetch),
     );
     return () => subscriptions.forEach((sub) => sub.remove());
   }, [tagsKey, refreshFetch]);
@@ -118,7 +120,7 @@ export function useFetch<T>(
   const data = use(promise);
 
   if (data === undefined) {
-    throw new Error('Undefined data');
+    throw new Error("Undefined data");
   }
 
   return { data, refreshFetch, isRefreshing: isPending };

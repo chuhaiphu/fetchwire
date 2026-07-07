@@ -1,5 +1,5 @@
-import { promiseCacheStore } from './promise-cache-store';
-import { eventEmitter } from './event-emitter';
+import { promiseCacheStore } from "./promise-cache-store";
+import { eventEmitter } from "./event-emitter";
 
 class FetchClient {
   // Why do we need this?
@@ -16,24 +16,41 @@ class FetchClient {
   private tagToFetchKeysMap = new Map<string, Set<string>>();
 
   /**
-   * Set the promise in cache and track the relationship between tags and fetch keys for invalidation
+   * Register all the tags to `fetchKey` links WITHOUT touching the cached promise.
+   *
+   * @param fetchKey - The unique key for the fetch function, used in promise cache store
+   * @param tags - Optional array of tags to associate with this fetch key
+   */
+  registerTags(fetchKey: string, tags?: string[]) {
+    if (!tags) return;
+
+    tags.forEach((tag) => {
+      // Skip empty tag keys
+      if (!tag) return;
+
+      let associatedFetchKeys = this.tagToFetchKeysMap.get(tag);
+      if (!associatedFetchKeys) {
+        associatedFetchKeys = new Set();
+        this.tagToFetchKeysMap.set(tag, associatedFetchKeys);
+      }
+      associatedFetchKeys.add(fetchKey);
+    });
+  }
+
+  /**
+   * Cache the promise under `fetchKey` AND register its `tags`.
+   *
    * @param fetchKey - The unique key for the fetch function, used in promise cache store
    * @param promise - The promise to be stored in the cache
    * @param tags - Optional array of tags associated with this fetch key, used for invalidation
    */
-  setFetchKeyToTags(fetchKey: string, promise: Promise<unknown>, tags?: string[]) {
+  cachePromiseAndRegisterTags(
+    fetchKey: string,
+    promise: Promise<unknown>,
+    tags?: string[],
+  ) {
     promiseCacheStore.set(fetchKey, promise);
-
-    if (tags && tags.length > 0) {
-      tags.forEach((tag) => {
-        let associatedFetchKeys = this.tagToFetchKeysMap.get(tag);
-        if (!associatedFetchKeys) {
-          associatedFetchKeys = new Set();
-          this.tagToFetchKeysMap.set(tag, associatedFetchKeys);
-        }
-        associatedFetchKeys.add(fetchKey);
-      });
-    }
+    this.registerTags(fetchKey, tags);
   }
 
   /**
