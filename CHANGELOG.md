@@ -1,5 +1,70 @@
 # Changelog
 
+## [5.1.0] - 2026-07-07
+
+### Breaking Changes
+
+- **`fetchClient.setFetchKeyToTags()` renamed to `fetchClient.cachePromiseAndRegisterTags()`.**
+
+  The old name described only the tag mapping, but the method does two things: it caches the
+  Promise **and** registers its tags. The new name states both. The signature and behavior are
+  unchanged — only the name differs.
+
+  Most applications never call this method directly (they use `clear()` and `remove()`), so this
+  affects only code that reached into `fetchClient` for a custom prefetch wrapper.
+
+  **Migration** — rename the call site:
+
+  ```ts
+  // Before (v5.0)
+  fetchClient.setFetchKeyToTags(fetchKey, promise, tags);
+
+  // After (v5.1)
+  fetchClient.cachePromiseAndRegisterTags(fetchKey, promise, tags);
+  ```
+
+### Added
+
+- **`fetchClient.registerTags(fetchKey, tags?)`.**
+
+  Registers the tag relationships for a `fetchKey` **without** caching a Promise — the tag-only
+  half of `cachePromiseAndRegisterTags`. The hooks use it to subscribe an already-cached key to
+  its tags on a cache hit (see _Fixed_ below). Exposed on `fetchClient` for advanced use.
+
+### Fixed
+
+- **Tags were dropped when a fetch resolved from a cached (prefetched) Promise.**
+
+  On a cache hit, `useFetch` / `useFetchFn` reused the cached Promise but never registered their
+  `tags`. As a result, a key populated by `prefetch()` — or shared across components — subscribed
+  to nothing, so a later `useMutationFn` with a matching `invalidatesTags` did **not** refresh it.
+
+  Both hooks now call `fetchClient.registerTags(fetchKey, tags)` on the cache-hit path, so a
+  prefetched fetch subscribes to its tags just like a fresh one.
+
+- **Spurious "Unhandled promise rejection" warnings from cached rejected Promises.**
+
+  A cached Promise is meant to be read by `use(promise)` during render, which surfaces any
+  rejection to the nearest `<ErrorBoundary>`. If the reader unmounts before that read runs — e.g.
+  it navigates away right after firing the mutation that invalidated the tag — nothing consumes
+  the rejection, and the runtime logs it as unhandled.
+
+  Every Promise entering the cache now gets a no-op rejection handler (`promise.catch(() => {})`),
+  so the rejection is always considered handled while still propagating to `use()` on the next
+  render.
+
+### Documentation
+
+- **Standardized JSDoc across the public API.** Unified the vocabulary so the same concept always
+  reads the same way: a callback that returns a Promise is a **"Promise-returning function"**, the
+  internal store is **"the Promise cache"**, and the reload behavior is **"refresh"** everywhere.
+  Each of `fetch`, `fetchFn`, and `mutationFn` now states what it is and when it runs. Added JSDoc
+  for `prefetch`, gave `useMutationFn` the same summary/return shape as the other hooks, and fixed
+  a malformed `transformResponse` description. The README's `fetchClient` reference was updated to
+  match the renamed and added methods.
+
+---
+
 ## [5.0.0] - 2026-06-20
 
 ### Breaking Changes

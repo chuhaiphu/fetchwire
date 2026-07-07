@@ -46,10 +46,10 @@ If you find **fetchwire** helpful and want to support its development, you can b
   - **`useFetch`** for **React 19+** new feature: Suspense-based data fetching (fetches on mount, suspends while loading) with `useTransition`-powered non-blocking refresh
   - **`useFetchFn`** for manually triggered data fetching with explicit loading/error state
   - **`useMutationFn`** for mutations
-  - With a simple, explicit way to refetch related data through tags
+  - With a simple, explicit way to refresh related data through tags
 
 - **`prefetch` for eager data loading**
-  - Pre-populate the promise cache before a component mounts, so `useFetch` / `useFetchFn` can resolve instantly without a redundant request.
+  - Pre-populate the Promise cache before a component mounts, so `useFetch` / `useFetchFn` can resolve instantly without a redundant request.
 
 - **`fetchClient` for centralized cache management**
   - A singleton that centralizes tag-to-fetchKey tracking and cache invalidation. Call `fetchClient.clear()` on logout to clear all cached data and tag associations in one step.
@@ -223,7 +223,7 @@ You can organize similar helpers for users, invoices, organizations, uploads, et
 - The component suspends while the initial fetch is in flight — no `isLoading` flag needed.
 - API errors are thrown and caught by the nearest `<ErrorBoundary>`.
 - `fetch` can return either a standard `HttpResponse<T>` envelope or raw data `T`.
-- `fetchKey` uniquely identifies this fetch in the internal promise cache, preventing infinite suspend loops.
+- `fetchKey` uniquely identifies this fetch in the internal Promise cache, preventing infinite suspend loops.
 - `refreshFetch` uses `useTransition` under the hood — React keeps showing the current data while the new fetch loads, instead of immediately re-suspending and showing the `<Suspense>` fallback.
 - `isRefreshing` indicates whether a transition-based refresh is in progress, letting you show inline loading indicators without losing existing content.
 
@@ -275,7 +275,7 @@ function TodoList() {
 
 ### 3. Fetch data with `useFetchFn` (manual trigger)
 
-`useFetchFn` is a generic hook that manages state for running an async function returning `HttpResponse<T>`, where `T` is **inferred** from your API helper. Unlike `useFetch`, you control when the fetch runs.
+`useFetchFn` is a generic hook that manages state for running a Promise-returning function that resolves to `HttpResponse<T>`, where `T` is **inferred** from your API helper. Unlike `useFetch`, you control when the fetch runs.
 
 **Key ideas:**
 
@@ -422,7 +422,7 @@ export function TodoActions() {
 
 ### 5. Tag-based invalidation and auto-refresh
 
-Tags provide a simple way to coordinate refetches across your app:
+Tags provide a simple way to coordinate refreshes across your app:
 
 - `useFetch(fetchFn, { fetchKey: '...', tags: [...] })` and `useFetchFn(fetchFn, { fetchKey: '...', tags: [...] })` subscribe to one or more **tags**.
 - `useMutationFn(mutationFn, { invalidatesTags: [...] })` emits those tags after a **successful** mutation.
@@ -564,7 +564,7 @@ executeMutationFn(payload, {
 
 ### Why `refreshFetch` cannot retry from an `<ErrorBoundary>`
 
-`refreshFetch` (returned by `useFetch`) works by updating an internal `useState` and overwriting the promise cache. Both of these operations require the component to be **mounted**. When an API call fails, `useFetch` throws the error to the nearest `<ErrorBoundary>`, which **unmounts** the component and replaces it with the fallback UI. At that point:
+`refreshFetch` (returned by `useFetch`) works by updating an internal `useState` and overwriting the Promise cache. Both of these operations require the component to be **mounted**. When an API call fails, `useFetch` throws the error to the nearest `<ErrorBoundary>`, which **unmounts** the component and replaces it with the fallback UI. At that point:
 
 - `refreshFetch` is no longer accessible (it lives inside the unmounted component).
 - Even if you held a stale reference to it, calling `setPromise` on an unmounted component has no effect.
@@ -658,7 +658,7 @@ function initWire(config: WireConfig): void;
 
 - **`baseUrl`**: Base API URL (e.g. `'https://api.example.com'`).
 - **`headers`**: Global headers applied to every request (`HeadersInit` — plain object, `Headers` instance, or array of `[name, value]` pairs). Merged before the computed `Authorization` header.
-- **`getToken`**: Async function called on each request; return the current access token or `null`. If a non-empty string is returned, fetchwire sends it as `Authorization: Bearer <token>`.
+- **`getToken`**: A Promise-returning function called on each request; return the current access token or `null`. If a non-empty string is returned, fetchwire sends it as `Authorization: Bearer <token>`.
 - **`interceptors`** (optional):
   - `onRequest(url, options)`: Called before every request with the full URL and final `RequestInit`. Modify headers, inject tracing IDs, or log outgoing requests. Can be async.
   - `onResponse(url, response)`: Called after every response, before the body is parsed. Use for logging, timing, or header inspection. Do not consume the response body — use `response.clone()` if needed. Can be async.
@@ -746,7 +746,7 @@ function useFetch<T>(
 
 Fetches immediately on mount and **suspends** the component while data is loading. Requires a `<Suspense>` boundary for the loading state and an `<ErrorBoundary>` for API errors in the parent tree.
 
-- **`fetch`**: Async function that can return either `HttpResponse<T>` or raw `T` (e.g. `wireApi<T>` helper or plain transformed payload). Type `T` is inferred from its return type.
+- **`fetch`**: A Promise-returning function that can return either `HttpResponse<T>` or raw `T` (e.g. `wireApi<T>` helper or plain transformed payload). Type `T` is inferred from its return type.
 - **`options.fetchKey`**: Required unique string key for this fetch, used to cache the in-flight Promise and prevent infinite re-suspension on re-render. Must match the key passed to `prefetch()` if prefetching is used.
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetch` is called automatically.
 - **`data`**: The resolved value from the fetch. The component suspends until this is available.
@@ -759,11 +759,12 @@ Fetches immediately on mount and **suspends** the component while data is loadin
 
 ### `fetchClient`
 
-The exported singleton instance of `FetchClient`. It centralizes the mapping between fetch keys, tags, and the internal promise cache. All hooks and `prefetch` use it internally.
+The exported singleton instance of `FetchClient`. It centralizes the mapping between fetch keys, tags, and the internal Promise cache. All hooks and `prefetch` use it internally.
 
 ```ts
 class FetchClient {
-  setFetchKeyToTags(
+  registerTags(fetchKey: string, tags?: string[]): void;
+  cachePromiseAndRegisterTags(
     fetchKey: string,
     promise: Promise<unknown>,
     tags?: string[],
@@ -778,7 +779,7 @@ const fetchClient: FetchClient;
 
 **Methods:**
 
-- **`fetchClient.clear()`** — removes all entries from the promise cache and resets the tag-to-fetchKey map. Call this on logout so no stale cached data persists into the next session.
+- **`fetchClient.clear()`** — removes all entries from the Promise cache and resets the tag-to-fetchKey map. Call this on logout so no stale cached data persists into the next session.
 
   ```ts
   import { fetchClient } from "fetchwire";
@@ -789,7 +790,7 @@ const fetchClient: FetchClient;
   }
   ```
 
-- **`fetchClient.invalidateTags(tags)`** — for each tag, deletes all associated cached promises and emits refresh events to any currently-mounted `useFetch` / `useFetchFn` hooks subscribed to those tags. Called automatically by `useMutationFn` after a successful mutation; exposed for advanced scenarios where you need to trigger invalidation imperatively (e.g. after a WebSocket push).
+- **`fetchClient.invalidateTags(tags)`** — for each tag, deletes all associated cached Promises and emits refresh events to any currently-mounted `useFetch` / `useFetchFn` hooks subscribed to those tags. Called automatically by `useMutationFn` after a successful mutation; exposed for advanced scenarios where you need to trigger invalidation imperatively (e.g. after a WebSocket push).
 
   ```ts
   import { fetchClient } from "fetchwire";
@@ -798,7 +799,7 @@ const fetchClient: FetchClient;
   fetchClient.invalidateTags(["todos"]);
   ```
 
-- **`fetchClient.remove(fetchKey)`** — removes a single entry from the promise cache without emitting any events. Use this in an `<ErrorBoundary>` reset handler to clear a rejected Promise so the next mount of the component starts a fresh fetch instead of re-throwing the cached error. See [Retrying after an API error](#retrying-after-an-api-error).
+- **`fetchClient.remove(fetchKey)`** — removes a single entry from the Promise cache without emitting any events. Use this in an `<ErrorBoundary>` reset handler to clear a rejected Promise so the next mount of the component starts a fresh fetch instead of re-throwing the cached error. See [Retrying after an API error](#retrying-after-an-api-error).
 
   ```ts
   import { fetchClient } from "fetchwire";
@@ -806,7 +807,9 @@ const fetchClient: FetchClient;
   fetchClient.remove("todos");
   ```
 
-- **`fetchClient.setFetchKeyToTags(fetchKey, promise, tags?)`** — stores a promise in the cache under `fetchKey` and registers the tag relationships. Used internally by `useFetch`, `useFetchFn`, and `prefetch`. Exposed for advanced use cases such as a custom prefetch wrapper.
+- **`fetchClient.cachePromiseAndRegisterTags(fetchKey, promise, tags?)`** — caches `promise` under `fetchKey` and registers its tag relationships. Used internally by `useFetch`, `useFetchFn`, and `prefetch`. Exposed for advanced use cases such as a custom prefetch wrapper.
+
+- **`fetchClient.registerTags(fetchKey, tags?)`** — registers the tag relationships for `fetchKey` **without** caching a Promise. Used internally when a hook reuses an already-cached Promise (e.g. one populated by `prefetch()`) and only needs to (re)subscribe that key to its tags.
 
 > **Note:** For most application code, `fetchClient.clear()` and `fetchClient.remove()` are the only methods you need to call directly.
 
@@ -821,11 +824,11 @@ function prefetch<T>(
 ): Promise<unknown> | undefined;
 ```
 
-Pre-populates the internal promise cache (via `fetchClient`) with the result of `fetchFn` so that subsequent `useFetch` or `useFetchFn` calls with the same `fetchKey` resolve instantly.
+Pre-populates the internal Promise cache (via `fetchClient`) with the result of `fetchFn` so that subsequent `useFetch` or `useFetchFn` calls with the same `fetchKey` resolve instantly.
 
-- **`fetchFn`**: Async function that returns `HttpResponse<T>` or raw `T`. The response is auto-unwrapped via `extractHttpResponseData`.
+- **`fetchFn`**: A Promise-returning function that returns `HttpResponse<T>` or raw `T`. The response is auto-unwrapped via `extractHttpResponseData`.
 - **`options.fetchKey`**: Required. The cache key. Must match the `fetchKey` in the `options` passed to `useFetch` or `useFetchFn`.
-- **`options.tags`**: Optional. Tags to associate with this fetch key. When a mutation later invalidates these tags, this cached promise is cleared even if the component is not currently mounted.
+- **`options.tags`**: Optional. Tags to associate with this fetch key. When a mutation later invalidates these tags, this cached Promise is cleared even if the component is not currently mounted.
 - **Returns**: The cached or newly created Promise. If a Promise already exists for `fetchKey`, the existing one is returned — no duplicate fetch.
 
 ```ts
@@ -863,8 +866,8 @@ function useFetchFn<T>(
 };
 ```
 
-- **`fetchFn`**: Async function (e.g. an API helper using `wireApi<T>`). Type `T` is inferred from its return type.
-- **`options.fetchKey`**: Required unique string key used to cache the in-flight promise via `fetchClient`. On the first `executeFetchFn()` call, the hook checks the cache for a prefetched Promise (set by `prefetch()`), avoiding a duplicate request. Every fetch also stores its Promise in the cache under this key for deduplication.
+- **`fetchFn`**: A Promise-returning function (e.g. an API helper using `wireApi<T>`). Type `T` is inferred from its return type.
+- **`options.fetchKey`**: Required unique string key used to cache the in-flight Promise via `fetchClient`. On the first `executeFetchFn()` call, the hook checks the cache for a prefetched Promise (set by `prefetch()`), avoiding a duplicate request. Every fetch also stores its Promise in the cache under this key for deduplication.
 - **`options.tags`**: Optional array of tag strings to subscribe to. When a mutation invalidates these tags, `refreshFetchFn` is called automatically.
 - **`executeFetchFn()`**: Runs `fetchFn`. Sets `isLoading: true` during the call; updates `data` and `error` on completion. Returns `Promise<T | null>` — the response is automatically unwrapped.
 - **`refreshFetchFn()`**: Re-runs the same `fetchFn`. Sets `isRefreshing: true` during the call (keeps existing `data` visible). Returns `Promise<T | null>`.
@@ -916,7 +919,7 @@ function useMutationFn<T, TVariables>(
 };
 ```
 
-- **`mutationFn`**: Async function that returns `Promise<HttpResponse<T>>`. If it takes one parameter, `executeMutationFn` will require that variable as the first argument.
+- **`mutationFn`**: A Promise-returning function that returns `Promise<HttpResponse<T>>`. If it takes one parameter, `executeMutationFn` will require that variable as the first argument.
 - **`options.invalidatesTags`**: Tags to emit after a **successful** mutation. All `useFetch` and `useFetchFn` hooks subscribed to any of these tags will refresh automatically.
 - **`executeMutationFn`**:
   - **No variables:** `executeMutationFn({ onSuccess, onError })`.
