@@ -36,12 +36,10 @@ sequenceDiagram
     autonumber
     actor User
     participant PF as prefetch()
-    participant FC as fetchClient
-    participant Cache as promiseCacheStore
     participant Wire as wireApi
     participant API as Server
-
-    Note over User,PF: inside a tap handler — prefetch runs before navigation
+    participant FC as fetchClient
+    participant Cache as promiseCacheStore
 
     User->>PF: prefetch(fetchFn, { fetchKey, tags })
 

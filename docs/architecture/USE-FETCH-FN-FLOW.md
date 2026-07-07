@@ -26,7 +26,7 @@ what the sequence diagrams below preserve.
 
 ```mermaid
 flowchart LR
-    Cmp["Consumer component"] -->|"useEffect / handler"| EXE["executeFetchFn()<br/>isRefresh: false"]
+    Cmp["Consumer Component"] -->|"useEffect / handler"| EXE["executeFetchFn()<br/>isRefresh: false"]
     Cmp -->|"event-handling-to-refresh / tag event"| REF["refreshFetchFn()<br/>isRefresh: true"]
 
     EXE --> PE["PENDING<br/>setState(isLoading:true, error:null)"]
@@ -56,7 +56,7 @@ Reachable **only** from `executeFetchFn` (never a refresh), and only when a
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Cmp as Consumer component
+    participant Cmp as Consumer Component
     participant H as useFetchFn
     participant FC as fetchClient
     participant Cache as promiseCacheStore
@@ -103,12 +103,12 @@ in-flight promise.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Cmp as Consumer component
+    participant Cmp as Consumer Component
     participant H as useFetchFn
-    participant FC as fetchClient
-    participant Cache as promiseCacheStore
     participant Wire as wireApi
     participant API as Server
+    participant FC as fetchClient
+    participant Cache as promiseCacheStore
 
     Cmp->>H: executeFetchFn()  ⇒ execute({ isRefresh: false })
 
@@ -155,12 +155,12 @@ sequenceDiagram
     autonumber
     actor User
     participant EM as eventEmitter
-    participant Cmp as Consumer component
+    participant Cmp as Consumer Component
     participant H as useFetchFn
-    participant FC as fetchClient
-    participant Cache as promiseCacheStore
     participant Wire as wireApi
     participant API as Server
+    participant FC as fetchClient
+    participant Cache as promiseCacheStore
 
     Note over Cmp,H: The mounted component holds useFetchFn instance.<br/>On mount it subscribed each tag →<br/>eventEmitter.addListener(tag, () => refreshFetchFn())
 

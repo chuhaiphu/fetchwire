@@ -14,7 +14,7 @@ pending, and surface data through React's `use()`.
 
 ```mermaid
 flowchart LR
-    Cmp["Consumer component<br/>useFetch(fetch, { fetchKey, tags })"] --> HIT{"promiseCacheStore<br/>has(fetchKey)?"}
+    Cmp["Consumer Component<br/>useFetch(fetch, { fetchKey, tags })"] --> HIT{"promiseCacheStore<br/>has(fetchKey)?"}
     HIT -->|"yes (e.g. prefetched)"| REUSE["reuse cached promise"]
     HIT -->|"no"| NEW["fetch() → cache promise<br/>register tags → fetchKey"]
     REUSE --> USE["const data = use(promise)"]
@@ -38,7 +38,7 @@ fires **no** request and reuses the stored promise.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Cmp as Consumer component
+    participant Cmp as Consumer Component
     participant H as useFetch
     participant FC as fetchClient
     participant Cache as promiseCacheStore
@@ -93,12 +93,12 @@ through `fetchClient`, then suspend on it.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Cmp as Consumer component
+    participant Cmp as Consumer Component
     participant H as useFetch
-    participant FC as fetchClient
-    participant Cache as promiseCacheStore
     participant Wire as wireApi
     participant API as Server
+    participant FC as fetchClient
+    participant Cache as promiseCacheStore
     participant React as React runtime
 
     Note over Cmp: component mounts (first render)
@@ -160,7 +160,7 @@ A mounted `useFetch` subscribes each of its `tags` to the `eventEmitter`. A
 sequenceDiagram
     autonumber
     participant EM as eventEmitter
-    participant Cmp as Consumer component
+    participant Cmp as Consumer Component
     participant H as useFetch
     participant Wire as wireApi
     participant API as Server

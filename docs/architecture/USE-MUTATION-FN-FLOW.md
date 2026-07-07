@@ -36,7 +36,7 @@ cached promise.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Cmp as Consumer component
+    participant Cmp as Consumer Component
     participant H as useMutationFn
     participant Wire as wireApi
     participant API as Server
@@ -110,6 +110,7 @@ which component issued the write.
 ---
 
 ## Notes
+
 - **Collection vs entity tags.** A broad tag (`'entity-list'`) refreshes _every_ reader of that
   collection in one write — simple, at the cost of refetching readers that may not have changed. A
   narrow, per-entity tag (`'entity-list-' + id`) refreshes exactly one. Choosing the granularity is
