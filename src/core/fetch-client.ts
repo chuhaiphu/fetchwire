@@ -16,10 +16,10 @@ class FetchClient {
   private tagToFetchKeysMap = new Map<string, Set<string>>();
 
   /**
-   * Register all the tags to `fetchKey` links WITHOUT touching the cached promise.
+   * Register all the tags to `fetchKey` links WITHOUT touching the cached Promise.
    *
-   * @param fetchKey - The unique key for the fetch function, used in promise cache store
-   * @param tags - Optional array of tags to associate with this fetch key
+   * @param fetchKey - The key under which this request's Promise is cached.
+   * @param tags - Optional array of tags to associate with this fetch key.
    */
   registerTags(fetchKey: string, tags?: string[]) {
     if (!tags) return;
@@ -38,25 +38,45 @@ class FetchClient {
   }
 
   /**
-   * Cache the promise under `fetchKey` AND register its `tags`.
+   * Cache the Promise under `fetchKey` AND register its `tags`.
    *
-   * @param fetchKey - The unique key for the fetch function, used in promise cache store
-   * @param promise - The promise to be stored in the cache
-   * @param tags - Optional array of tags associated with this fetch key, used for invalidation
+   * @param fetchKey - The key under which this request's Promise is cached.
+   * @param promise - The Promise to cache.
+   * @param tags - Optional array of tags associated with this fetch key, used for invalidation.
    */
   cachePromiseAndRegisterTags(
     fetchKey: string,
     promise: Promise<unknown>,
     tags?: string[],
   ) {
+    // Why do we need this?
+    // 1. A cached promise is meant to be READ by React's `use(promise)` during render;
+    //    that read is what throws a rejection to the nearest <ErrorBoundary>.
+    // 2. But a refresh triggered by a tag event (useFetch.refreshFetch) creates the promise
+    //    OUTSIDE render and only schedules a re-render to read it on the next pass.
+    // 3. If the reader unmounts before that re-render runs
+    //    — e.g. it navigates away right after firing the mutation that invalidated the tag — 
+    //    `use()` will never able to reads the promise, so nothing consumes the rejection.
+    // 4. A rejected promise with no handler by the end of the microtask is reported by the
+    //    runtime as an "Unhandled promise rejection" .
+    //
+    // What this line does:
+    // `promise.catch(() => {})` registers a rejection handler on the promise we are about to cache.
+    // `void` discards the new promise that `.catch` returns.
+    // we are not chaining anything, we only want the side effect:
+    // "this promise now has a rejection handler attached."
+    // It runs once, synchronously, every time a promise enters the cache.
+    void promise.catch(() => {});
+
     promiseCacheStore.set(fetchKey, promise);
     this.registerTags(fetchKey, tags);
   }
 
   /**
-   * Invalidate the tags, which will clear all promises in cache store associated with the fetch keys related to those tags
-   * This also emit events to trigger refresh on mounted components.
-   * @param tags - An array of tags to be invalidated
+   * Invalidate the tags: clears every Promise in the Promise cache whose fetch key
+   * is associated with those tags. It also emits events to trigger a refresh on
+   * mounted components.
+   * @param tags - An array of tags to be invalidated.
    */
   invalidateTags(tags: string[]) {
     tags.forEach((tag) => {
@@ -70,7 +90,7 @@ class FetchClient {
   }
 
   /**
-   * Remove a single fetchKey from the cache without emitting any events.
+   * Remove a single fetchKey from the Promise cache without emitting any events.
    * Use this to clear a rejected Promise so the next render initiates a fresh fetch.
    * @param fetchKey - The fetchKey passed to `useFetch` / `prefetch`.
    */
@@ -79,7 +99,7 @@ class FetchClient {
   }
 
   /**
-   * Clear all the promises in cache store and the tag to fetch keys map.
+   * Clear every Promise in the Promise cache and the tag-to-fetchKey map.
    */
   clear() {
     promiseCacheStore.clear();

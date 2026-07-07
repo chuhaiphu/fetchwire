@@ -13,15 +13,25 @@ interface MutationState<T> {
 }
 
 /**
+ * A hook that runs a mutation on demand and tracks its pending and result state.
  *
- * @param mutationFn - An async function that performs the mutation.
- * @param options - Configuration for invalidating tags upon successful execution.
- * @returns An object containing the mutation state and the execution function.
- * * @example
+ * @param mutationFn - A Promise-returning function `() => Promise<HttpResponse<T>>`.
+ *   fetchwire runs it only when you call `executeMutationFn()`.
+ * @param options - Options for this hook.
+ *   - `invalidatesTags` — an optional list of tag strings to invalidate after a
+ *     successful mutation. Every `useFetch` / `useFetchFn` subscribed to a matching
+ *     tag refreshes automatically. Tag strings must not contain commas.
+ * @returns
+ *   - `data` — the resolved data of type `T`, or null.
+ *   - `isMutating` — true while the mutation is in flight.
+ *   - `executeMutationFn` — runs `mutationFn`; accepts optional per-call
+ *     `{ onSuccess, onError }` callbacks.
+ *   - `reset` — resets state back to the initial idle state.
+ * @example
  * const { executeMutationFn, isMutating } = useMutationFn(logoutApi, {
- * invalidatesTags: ['user-session']
+ *   invalidatesTags: ['user-session'],
  * });
- * // Trigger without arguments:
+ * // Trigger without variables:
  * executeMutationFn({ onSuccess: () => console.log('Logged out') });
  */
 export function useMutationFn<T>(
@@ -37,14 +47,25 @@ export function useMutationFn<T>(
 };
 
 /**
+ * A hook that runs a mutation on demand and tracks its pending and result state.
  *
- * @template TVariables - The type of the input variables for the mutation.
- * @param mutationFn - An async function receiving variables and returning a promise.
- * @param options - Configuration for invalidating tags upon successful execution.
- * @returns An object containing the mutation state and the execution function.
- * * @example
+ * @template TVariables - The type of the input variables passed to `mutationFn`.
+ * @param mutationFn - A Promise-returning function
+ *   `(variables: TVariables) => Promise<HttpResponse<T>>`. fetchwire runs it only
+ *   when you call `executeMutationFn(variables)`.
+ * @param options - Options for this hook.
+ *   - `invalidatesTags` — an optional list of tag strings to invalidate after a
+ *     successful mutation. Every `useFetch` / `useFetchFn` subscribed to a matching
+ *     tag refreshes automatically. Tag strings must not contain commas.
+ * @returns
+ *   - `data` — the resolved data of type `T`, or null.
+ *   - `isMutating` — true while the mutation is in flight.
+ *   - `executeMutationFn` — runs `mutationFn(variables)`; accepts optional per-call
+ *     `{ onSuccess, onError }` callbacks.
+ *   - `reset` — resets state back to the initial idle state.
+ * @example
  * const { executeMutationFn } = useMutationFn((id: string) => deleteItem(id), {
- * invalidatesTags: ['items']
+ *   invalidatesTags: ['items'],
  * });
  * // Trigger with variables:
  * executeMutationFn('item-id-123', { onSuccess: () => alert('Deleted') });

@@ -3,7 +3,7 @@ import { WireConfig } from '../interface';
 let globalWireConfig: WireConfig | null = null;
 
 /**
- * Initializes the library with mandatory configurations.
+ * Initializes fetchwire with the required configuration.
  * Must be executed at the application entry point before any API calls.
  * @param config - The required configuration object including baseUrl and getToken.
  */

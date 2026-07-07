@@ -183,28 +183,32 @@ sequenceDiagram
     FC->>Cache: set(fetchKey, newPromise)
     FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
     H->>React: startTransition(() => setPromise(newPromise))
-    React->>H: re-renders the component
-    H->>React: const data = use(newPromise)
 
-    rect rgba(128,128,128,0.12)
-        Note over React: PENDING — a Transition, so React shows no Suspense fallback
-        React-->>Cmp: keeps the current data on screen (isRefreshing = true)
-    end
+    alt reader still mounted
+        React->>H: re-render → const data = use(newPromise)
 
-    Note over React: newPromise settles → React commits the pending render
-
-    rect rgba(128,128,128,0.12)
-        Note over React: SETTLED — use(newPromise) reads the outcome
-        alt fulfilled
-            React-->>H: use(newPromise) returns the fresh value → isRefreshing = false
-            alt data is defined
-                H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
-            else data === undefined (guard)
-                H-->>Cmp: throw Error('Undefined data') → nearest Error Boundary fallback shown
-            end
-        else rejected (ApiError)
-            React-->>Cmp: use(newPromise) throws the ApiError → nearest Error Boundary fallback shown
+        rect rgba(128,128,128,0.12)
+            Note over React: PENDING — a Transition, so React shows no Suspense fallback
+            React-->>Cmp: keeps the current data on screen (isRefreshing = true)
         end
+
+        Note over React: newPromise settles → React commits the pending render
+
+        rect rgba(128,128,128,0.12)
+            Note over React: SETTLED — use(newPromise) reads the outcome
+            alt fulfilled
+                React-->>H: use(newPromise) returns the fresh value → isRefreshing = false
+                alt data is defined
+                    H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
+                else data === undefined (guard)
+                    H-->>Cmp: throw Error('Undefined data') → nearest Error Boundary fallback shown
+                end
+            else rejected (ApiError)
+                React-->>Cmp: use(newPromise) throws the ApiError → nearest Error Boundary fallback shown
+            end
+        end
+    else reader unmounted before the scheduled re-render
+        Note over H,Cache: the re-render never runs, so use() never reads newPromise.<br/>void promise.catch(() => {}) absorbs any rejection
     end
 ```
 
@@ -231,11 +235,10 @@ sequenceDiagram
 - **`tags` connect reads to writes.** A read subscribes to tags; a
   [mutation](./USE-MUTATION-FN-FLOW.md) invalidates tags. The overlap is what turns a successful write
   into an automatic re-read of every mounted reader sharing that tag.
-- **Tags register should match the prefetch's tags.** `prefetch` and the reader that consumes the same `fetchKey`
-  should declare the **same** `tags`. Tag associations _accumulate as a union_ (not overriden), so
-  differing tags make the key just becomes invalidatable by _both_ sets, which only ever
-  causes an extra (safe) refetch, never stale data. Still, we should keep them
-  identical so "what invalidates this key" has one obvious answer.
+- **Tag registration should match the prefetch's tags.** `prefetch` and the reader that consumes the same `fetchKey`
+  should declare the **same** `tags`. Tag associations _accumulate as a union_ (not overridden), so
+  differing tags just make the key invalidatable by _both_ sets — an extra (safe) refetch on next mount,
+  never stale data. Still, we should keep them identical so "what invalidates this key" has one obvious answer.
 - **`refreshFetch` requires a mounted component.** It sets internal promise state via `useTransition`, so
   it only has an effect while the component is rendered. To force a fresh fetch from _outside_ a mounted
   reader (e.g. resetting a rejected key), clear the cache with `fetchClient.remove(fetchKey)` and let the

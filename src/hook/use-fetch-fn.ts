@@ -14,25 +14,27 @@ interface FetchState<T> {
 }
 
 /**
- * A hook for manually handling the execution of a fetch function and managing the state of that fetch.
+ * A hook that runs a fetch on demand and tracks its loading, refreshing, and error state.
  *
- * @param fetchFn - A promise function that returns `Promise<HttpResponse<T>>`.
- * @param options - Required options for this hook.
- *   - `fetchKey` — a unique key used to cache the in-flight promise. If `prefetch()`
- *     was called with the same key beforehand, the first execution will reuse the
- *     cached promise instead of firing a new network request.
- *   - `tags` — optional list of tag strings that will trigger a refresh when a
- *     `useMutationFn` with matching `invalidatesTags` completes.
- *     Tag strings must not contain commas.
+ * @param fetchFn - A Promise-returning function `() => Promise<HttpResponse<T>>`.
+ *   fetchwire does not call it on mount; it runs only when you call
+ *   `executeFetchFn()` (initial fetch) or `refreshFetchFn()` (refresh).
+ * @param options - Options for this hook.
+ *   - `fetchKey` — a unique key that caches this request's Promise. If `prefetch()`
+ *     ran with the same key beforehand, the hook reuses the cached Promise instead
+ *     of firing a new request.
+ *   - `tags` — an optional list of tag strings this request subscribes to. When a
+ *     `useMutationFn` invalidates a matching tag via `invalidatesTags`, the hook
+ *     refreshes automatically. Tag strings must not contain commas.
  *
  * @returns
  *   - `data` — the resolved value of type `T`, or null if not yet fetched.
  *   - `isLoading` — true while the initial fetch is in flight.
  *   - `isRefreshing` — true while a refresh is in flight.
  *   - `error` — an `ApiError` if the last fetch failed, otherwise null.
- *   - `executeFetchFn` — trigger the initial fetch manually.
- *   - `refreshFetchFn` — trigger a refresh (bypasses the promise cache).
- *   - `reset` — reset state back to the initial idle state.
+ *   - `executeFetchFn` — manually triggers the initial fetch.
+ *   - `refreshFetchFn` — manually triggers a refresh (bypasses the Promise cache).
+ *   - `reset` — resets state back to the initial idle state.
  */
 export function useFetchFn<T>(
   fetchFn: () => Promise<HttpResponse<T>>,

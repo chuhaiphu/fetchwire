@@ -4,8 +4,9 @@ The **eager** primitive: start a request **before** the component that needs it 
 in-flight promise under a `fetchKey`, and let the later [`useFetch`](./USE-FETCH-FLOW.md) /
 [`useFetchFn`](./USE-FETCH-FN-FLOW.md) pick it up instead of firing its own request.
 
-> **The one idea that defines this flow.** `prefetch` is not a hook and holds no state. It just an event handler function that puts a
-> promise into the shared `promiseCacheStore` under a `fetchKey`.
+> **The one idea that defines this flow.** `prefetch` is not a hook and holds no state. It's just a plain
+> function — typically called from an event handler — that puts a promise into the shared
+> `promiseCacheStore` under a `fetchKey`.
 
 ---
 
@@ -94,11 +95,10 @@ flowchart TB
 - **The key is the whole contract.** Hand-off works only when `prefetch`'s `fetchKey` is byte-for-byte
   the one the destination [`useFetch`](./USE-FETCH-FLOW.md)/[`useFetchFn`](./USE-FETCH-FN-FLOW.md) uses.
   A mismatch silently degrades to a normal (duplicate) fetch.
-- **Tags register should match the prefetch's tags.** `prefetch` and the reader that consumes the same `fetchKey`
-  should declare the **same** `tags`. Tag associations _accumulate as a union_ (not overriden), so
-  differing tags make the key just becomes invalidatable by _both_ sets, which only ever
-  causes an extra (safe) refetch, never stale data. Still, we should keep them
-  identical so "what invalidates this key" has one obvious answer.
+- **Tag registration should match the prefetch's tags.** `prefetch` and the reader that consumes the same `fetchKey`
+  should declare the **same** `tags`. Tag associations _accumulate as a union_ (not overridden), so
+  differing tags just make the key invalidatable by _both_ sets — an extra (safe) refetch on next mount,
+  never stale data. Still, we should keep them identical so "what invalidates this key" has one obvious answer.
 - **First read reuses it; a refresh bypasses it.** A reader's _initial_ fetch honors the cache hit; an
   explicit `refreshFetch`/`refreshFetchFn` always goes to the network. So a warmed key speeds up the
   first paint without pinning stale data.

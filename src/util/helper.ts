@@ -8,7 +8,7 @@ import { HttpResponse } from '../interface';
  * This keeps `useFetch` flexible so callers can return either `wireApi(...)`
  * style responses or plain data values.
  *
- * @param res - The response value returned by a fetch function.
+ * @param res - The response value returned by a Promise-returning function.
  * @returns The normalized payload of type `T`.
  */
 export function extractHttpResponseData<T>(res: HttpResponse<T> | T) {

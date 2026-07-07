@@ -1,7 +1,7 @@
 # useFetchFn — Imperative Data Flow
 
 The **imperative** fetch hook: it exposes plain state — `data`, `isLoading`, `isRefreshing`, `error` — and a
-function for us to call ourself.
+function for us to call ourselves.
 
 > **The one idea that defines this flow.** `useFetchFn` does **not** suspend and does **not** throw to an
 > `ErrorBoundary`. It models the promise's whole lifecycle — **pending → fulfilled | rejected** — as three
@@ -219,11 +219,10 @@ sequenceDiagram
   stable reference, that effect runs once and does not loop.
 - **`reset()`** returns state to the idle shape (`data:null, isLoading:false, isRefreshing:false,
 error:null`) without touching the cache.
-- **Tags register should match the prefetch's tags.** `prefetch` and the reader that consumes the same `fetchKey`
-  should declare the **same** `tags`. Tag associations _accumulate as a union_ (not overriden), so
-  differing tags make the key just becomes invalidatable by _both_ sets, which only ever
-  causes an extra (safe) refetch, never stale data. Still, we should keep them
-  identical so "what invalidates this key" has one obvious answer.
+- **Tag registration should match the prefetch's tags.** `prefetch` and the reader that consumes the same `fetchKey`
+  should declare the **same** `tags`. Tag associations _accumulate as a union_ (not overridden), so
+  differing tags just make the key invalidatable by _both_ sets — an extra (safe) refetch on next mount,
+  never stale data. Still, we should keep them identical so "what invalidates this key" has one obvious answer.
 
 ---
 

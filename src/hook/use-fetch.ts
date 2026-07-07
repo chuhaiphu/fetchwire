@@ -21,26 +21,29 @@ import { fetchClient } from "../core/fetch-client";
  * </ErrorBoundary>
  * ```
  *
- * @param fetch - A promise function that returns `Promise<HttpResponse<T> | T>`.
- *   You can return a standard `HttpResponse<T>` envelope or raw data `T`.
- * @param options - Required options for this hook.
- *   - `fetchKey` — a unique key used to cache the in-flight promise. Must match
- *     the key passed to `prefetch()` if prefetching is used.
- *   - `tags` — optional list of tag strings that will trigger a refresh when a
- *     `useMutationFn` with matching `invalidatesTags` completes.
- *     Tag strings must not contain commas.
+ * @param fetch - A Promise-returning function `() => Promise<HttpResponse<T> | T>`.
+ *   fetchwire calls it automatically on mount to start the fetch, and again on
+ *   every `refreshFetch()` or tag invalidation. Return either an `HttpResponse<T>`
+ *   envelope or the raw data `T`.
+ * @param options - Options for this hook.
+ *   - `fetchKey` — a unique key that caches this request's Promise. If `prefetch()`
+ *     ran with the same key beforehand, the hook reuses the cached Promise instead
+ *     of firing a new request.
+ *   - `tags` — an optional list of tag strings this request subscribes to. When a
+ *     `useMutationFn` invalidates a matching tag via `invalidatesTags`, the hook
+ *     refreshes automatically. Tag strings must not contain commas.
  *
  * @returns
- *   - `data` — the resolved value of type `T` or null.
- *   - `refreshFetch` — a function to manually trigger a new fetch while the component
- *     is mounted. Uses `useTransition` internally so the current data stays visible
- *     while the new fetch loads. **Cannot be used to retry from an ErrorBoundary**:
- *     when the ErrorBoundary catches an API error the component is unmounted, so
- *     `refreshFetch` is inaccessible and its internal `setPromise` state update has
- *     no effect. To retry from an ErrorBoundary, call `fetchClient.remove(fetchKey)`
- *     inside the boundary's reset handler before remounting the component — this
- *     clears the rejected Promise from cache so the next mount starts a fresh fetch.
- *   - `isRefreshing` — true while a triggered refresh is in flight.
+ *   - `data` — the resolved value of type `T`, or null.
+ *   - `refreshFetch` — manually triggers a refresh while the component is mounted.
+ *     Uses `useTransition` internally so the current data stays visible while the
+ *     refresh loads. **Cannot be used to retry from an ErrorBoundary**: when the
+ *     ErrorBoundary catches an API error the component is unmounted, so `refreshFetch`
+ *     is inaccessible and its internal `setPromise` state update has no effect. To
+ *     retry from an ErrorBoundary, call `fetchClient.remove(fetchKey)` inside the
+ *     boundary's reset handler before remounting the component — this clears the
+ *     rejected Promise from the Promise cache so the next mount starts a fresh fetch.
+ *   - `isRefreshing` — true while a refresh is in flight.
  */
 
 export function useFetch<T>(

@@ -72,7 +72,7 @@ export interface WireConfig {
   headers?: HeadersInit;
 
   /**
-   * Async function that returns the current access token, or null if not logged in.
+   * A Promise-returning function that resolves to the current access token, or null if not logged in.
    *
    * When a non‑empty token is returned, fetchwire will send it as:
    * `Authorization: Bearer <token>`.
@@ -92,7 +92,8 @@ export interface WireConfig {
    * Optional function to transform the raw JSON response from the server into the
    * standardized `HttpResponse` shape.
    *
-   * If not provided, fetchwire will assume the raw JSON to "data" attribute in the HttpResponse`.
+   * If not provided, fetchwire wraps the raw JSON as the `data` field of the
+   * returned `HttpResponse`.
    */
   transformResponse?: (json: unknown) => HttpResponse<unknown>;
 
@@ -117,11 +118,9 @@ export interface WireRequestInit extends RequestInit {
  */
 export interface FetchOptions {
   /**
-   * A unique key used to cache the in-flight promise.
-   *
-   * This key is shared with `prefetch()` — if `prefetch()` was called with the
-   * same key before the hook mounts, the hook will reuse the cached promise and
-   * avoid a duplicate network request.
+   * A unique key that caches this request's Promise. If `prefetch()` ran with the
+   * same key beforehand, the hook reuses the cached Promise instead of firing a new
+   * request.
    *
    * The key must be unique across all concurrent fetches. A good convention is
    * to include the resource name and any dynamic segments, e.g. `"todos"` or
@@ -130,10 +129,9 @@ export interface FetchOptions {
   fetchKey: string;
 
   /**
-   * Tags that this fetch subscribes to.
-   *
-   * When a mutation invalidates any of these tags, the hook will automatically
-   * re‑run the last request.
+   * An optional list of tag strings this request subscribes to. When a
+   * `useMutationFn` invalidates a matching tag via `invalidatesTags`, the hook
+   * refreshes automatically.
    *
    * @constraint Tag strings must not contain commas. Commas are used internally
    * to serialize the tag array into a stable dependency key.
@@ -150,10 +148,9 @@ export interface FetchOptions {
  */
 export interface MutationOptions {
   /**
-   * Tags that should be invalidated after a successful mutation.
-   *
-   * All active `useFetch` and `useFetchFn` hooks that subscribed to any of
-   * these tags will be notified and refreshed.
+   * An optional list of tag strings to invalidate after a successful mutation.
+   * Every `useFetch` / `useFetchFn` subscribed to a matching tag refreshes
+   * automatically.
    *
    * @constraint Tag strings must not contain commas. Commas are used internally
    * to serialize the tag array into a stable dependency key.

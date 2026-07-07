@@ -49,6 +49,7 @@ sequenceDiagram
     H->>H: setState(isMutating: true)
 
     H->>Wire: await mutationFn(variables)
+    Wire->>API: request (POST / PUT / DELETE)
 
     alt success (mounted)
         API-->>H: HttpResponse { data }
