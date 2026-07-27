@@ -80,10 +80,10 @@ sequenceDiagram
     rect rgba(128,128,128,0.12)
         Note over H: SETTLED
         alt fulfilled
-            H->>H: if mounted → setState(data, isLoading:false, isRefreshing:false, error:null)
+            H->>H: if newest run → setState(data, isLoading:false, isRefreshing:false, error:null)
             H-->>Cmp: re-render with data
         else rejected (ApiError)
-            H->>H: if mounted → setState(data:null, error: apiError)
+            H->>H: if newest run → setState(data:null, error: apiError)
             H-->>Cmp: re-render with error
         end
     end
@@ -131,18 +131,15 @@ sequenceDiagram
         Note over H: SETTLED
         alt fulfilled
             API-->>H: payload
-            H->>H: if mounted → setState(data, isLoading:false, isRefreshing:false, error:null)
+            H->>H: if newest run → setState(data, isLoading:false, isRefreshing:false, error:null)
             H-->>Cmp: re-render with data
         else rejected (ApiError)
             API-->>H: ApiError (non-OK) / network error
-            H->>H: if mounted → setState(data:null, error: apiError)
+            H->>H: if newest run → setState(data:null, error: apiError)
             H-->>Cmp: re-render with error
         end
     end
 ```
-
-> **Why need the `isMounted` ref guard.** `execute` is async; the component may unmount mid-flight (navigation).
-> The guard prevents a `setState` on an unmounted component — the result is simply dropped.
 
 ---
 
@@ -192,11 +189,11 @@ sequenceDiagram
         Note over H: SETTLED
         alt fulfilled
             API-->>H: payload
-            H->>H: if mounted → setState(data, isRefreshing:false, error:null)
+            H->>H: if newest run → setState(data, isRefreshing:false, error:null)
             H-->>Cmp: re-render with fresh data
         else rejected (ApiError)
             API-->>H: ApiError
-            H->>H: if mounted → setState(data:null, error: apiError)
+            H->>H: if newest run → setState(data:null, error: apiError)
             H-->>Cmp: re-render with error
         end
     end
@@ -217,6 +214,11 @@ sequenceDiagram
 - **Must call `executeFetchFn` ourself.** Nothing fetches on mount automatically — the consumer triggers
   it (typically `useEffect(() => { executeFetchFn() }, [executeFetchFn])`). Because `executeFetchFn` is a
   stable reference, that effect runs once and does not loop.
+- **Overlapping runs resolve by recency, not by arrival.** Two `refreshFetchFn()` calls (or a
+  `fetchKey` that changes while a run is in flight) produce two independent requests writing one
+  state. The newer run always wins, whichever response lands last. `isLoading` / `isRefreshing`
+  follow the same rule: they read "is the **newest** run still in flight", so a retired run settling
+  late neither flips the flag nor moves the data.
 - **`reset()`** returns state to the idle shape (`data:null, isLoading:false, isRefreshing:false,
 error:null`) without touching the cache.
 - **Tag registration should match the prefetch's tags.** `prefetch` and the reader that consumes the same `fetchKey`

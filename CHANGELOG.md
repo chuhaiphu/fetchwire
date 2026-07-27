@@ -1,5 +1,155 @@
 # Changelog
 
+## [5.2.0] - 2026-07-27
+
+### Breaking Changes
+
+- **Without `transformResponse`, fetchwire no longer guesses at an envelope.**
+
+  The default path read `data`, `status`, `statusCode` and `message` off the parsed body:
+
+  ```ts
+  data: jsonResponse.data ?? jsonResponse,
+  status: jsonResponse.status ?? jsonResponse.statusCode ?? response.status,
+  message: jsonResponse.message ?? "",
+  ```
+
+  That assumes those four names carry the meaning they have in one backend convention. For any API
+  where they are ordinary domain fields, the result was wrong — silently:
+
+  | Body from the server | Old result |
+  | --- | --- |
+  | `{"id":"o-1","status":2,"total":500000}` | `status: 2` — an order's state reported as the HTTP status |
+  | `{"id":9,"message":"Hello"}` | `message: "Hello"` — a chat message reported as the response message |
+  | `{"id":5,"name":"Q3","data":[1,2,3]}` | `data: [1,2,3]` — **`id` and `name` lost** |
+
+  The default path now does the only thing that is true without knowing the API: the body **is** the
+  data, and `status` comes from the response. This also restores the documented contract — the
+  `transformResponse` docstring already said the default *"wraps the raw JSON as the `data` field"*,
+  and `README` already pointed at `transformResponse` for envelope handling.
+
+  **Migration** — if your API uses an envelope and you relied on the implicit unwrap, declare it:
+
+  ```ts
+  initWire({
+    transformResponse: (json) => {
+      const body = json as { statusCode?: number; message?: string; data?: unknown };
+      return { data: body.data, status: body.statusCode, message: body.message };
+    },
+  });
+  ```
+
+  Projects that already configure `transformResponse` are unaffected.
+
+- **`ApiError.statusCode` no longer comes from the error body.**
+
+  The non-OK branch resolved it as `body.statusCode ?? response.status`, letting a number the
+  backend typed into its own payload outrank the status of the actual HTTP exchange. For a NestJS
+  backend the two are always equal, so this looked harmless — but an API that uses `statusCode` for
+  a domain code broke the documented `onError` pattern silently:
+
+  ```
+  HTTP 401,  body {"statusCode":1001,...}   →  old: ApiError.statusCode === 1001
+  onError: if (error.statusCode === 401) redirectToLogin()   // never fired
+  ```
+
+  `statusCode` is now always `response.status`. It is the one field fetchwire holds first-hand, so
+  it is never taken from the body — the same rule that removed the envelope guessing above.
+
+  **Migration** — none for a backend whose error `statusCode` mirrors the HTTP status. If yours
+  carries a domain code, read it in `transformError`, which receives the untouched body.
+
+- **`transformError` now receives the parsed body untouched.**
+
+  It previously received a fetchwire-built object with `message` / `error` / `statusCode` filled in,
+  which overwrote what the server actually sent. A NestJS validation body (`message: string[]`) or a
+  Google-style body (`error: { code, message }`) reached the consumer already flattened, so a
+  transform written to read those shapes could not see them.
+
+  With no `transformError` configured, the default `ApiError` now accepts a body value only when it
+  is a `string` — `ApiError` extends `Error`, whose `message` must be one. A `string[]` message or an
+  object `error` falls back to `HTTP <status>` / `"HTTP_ERROR"` instead of being coerced.
+
+  **Migration** — a `transformError` that assumed the fields were always present must handle their
+  absence; in exchange it now sees the real payload. Consumers without a `transformError` whose API
+  returns non-string `message` / `error` should add one.
+
+### Fixed
+
+- **An empty response body was silently turned into `{}`.**
+
+  `wireApi` classified the body by whether the text was truthy: `textResponse ? JSON.parse(...) : {}`.
+  A response that arrived with **no body at all** therefore became byte-identical to one carrying a
+  legitimate empty object, and every layer above lost the ability to tell them apart. Applications
+  had to reconstruct the distinction by guessing from a missing envelope field — an inference about
+  the transport drawn from application-level data.
+
+  The body is now classified by **status**, which is HTTP's own contract. `204` and `205` are defined
+  as bodiless (RFC 9110 §15.3.5, §15.3.6) and resolve to `{ data: undefined, status, message: "" }`.
+  Every other status promises a representation, so an empty body there throws
+  `ApiError` with `errorCode: "EMPTY_BODY"` and the real status code. Its message carries the
+  `content-length` header, which locates the loss without guesswork: `0` means the sender sent
+  nothing; absent or non-zero means the body went missing after the headers arrived.
+
+  **Migration** — if you detected empty responses inside `transformResponse` (e.g. by testing for a
+  missing `statusCode`), delete that check: the case now fails earlier, as a typed error. If you
+  relied on receiving `{}`, catch `errorCode === "EMPTY_BODY"` instead.
+
+- **A non-JSON body was reported as a network error.**
+
+  `JSON.parse` throwing a `SyntaxError` fell through to the outermost `catch`, which labelled it
+  `NETWORK_ERROR` / `520`. A proxy's HTML error page served with a `2xx` was thus indistinguishable
+  from a connection failure. It now throws `errorCode: "INVALID_JSON"` carrying the real status.
+
+  **Migration** — none, unless you matched on `NETWORK_ERROR` to catch malformed payloads.
+
+- **Bodiless error responses all collapsed to one hardcoded message.**
+
+  The non-OK branch called `response.json()`, which throws on an empty body, and fell back to a
+  hardcoded `{ message: "Unknown server error", error: "UNKNOWN" }`. Since a bodiless error response
+  is normal (a `304`, or a `502` from a proxy), a whole class of errors became textually identical:
+  the status code survived through the `?? response.status` fallbacks further down, but the message
+  and the error code did not. `transformError` also received a body with no `statusCode` at all, so
+  a consumer transform reading that field saw `undefined`. And `json()` consumes the body even when
+  it throws, leaving no way to inspect what actually arrived.
+
+  The branch now reads the body as text — which never throws — so a bodiless error keeps its
+  identity. See the two entries under **Breaking Changes** for what is built from it.
+
+  **Migration** — none by itself.
+
+- **Bugs in consumer code were relabelled as network errors.**
+
+  The `try` block wrapped `onRequest`, `onResponse` and `transformResponse` alongside `fetch()`, so a
+  `TypeError` in any of them surfaced as `NETWORK_ERROR` / `520`. Only the `fetch()` call is wrapped
+  now — the one failure that genuinely is a transport failure.
+
+  **Migration** — errors thrown from your interceptors or `transformResponse` now propagate as
+  themselves instead of as an `ApiError`. Code that assumed every rejection from `wireApi` is an
+  `ApiError` should narrow with `instanceof` rather than cast.
+
+- **`useFetchFn` let a slow response overwrite a newer one.**
+
+  Overlapping runs — an effect, a tag listener, a pull-to-refresh — wrote one shared state in
+  whatever order responses arrived, so the slowest run won by landing last. Each run now claims a
+  serial number and writes only if it is still the newest; `isLoading` / `isRefreshing` follow the
+  same rule.
+
+  **Migration** — none. `execute` still resolves with its own result even when a newer run took over
+  the state.
+
+- **`useMutationFn` dropped `invalidateTags` and both callbacks when the caller unmounted mid-flight.**
+
+  An `isMounted` ref gated everything after `await mutationFn(...)`, so a mutation that succeeded on
+  the server could leave every reader on a stale cached promise and surface no error at all. The
+  guard is gone: unmounting now affects only `setState`, which React already no-ops.
+
+  **Migration** — `onSuccess` / `onError` now run in cases where they were silently skipped. Write
+  them to tolerate a gone component: a router, a store, or an alert rather than the caller's own
+  `setState`.
+
+---
+
 ## [5.1.0] - 2026-07-07
 
 ### Breaking Changes

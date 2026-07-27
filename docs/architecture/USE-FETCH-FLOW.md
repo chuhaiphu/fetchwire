@@ -69,7 +69,7 @@ sequenceDiagram
             alt data is defined
                 H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
             else data === undefined (guard)
-                H-->>Cmp: throw Error('Undefined data') → nearest Error Boundary fallback shown
+                H-->>Cmp: throw ApiError('Response resolved with no data', 'EMPTY_DATA') → nearest Error Boundary fallback shown
             end
         else rejected (ApiError)
             React-->>Cmp: use(promise) throws the ApiError → nearest Error Boundary fallback shown
@@ -129,7 +129,7 @@ sequenceDiagram
             alt data is defined
                 H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
             else data === undefined (guard)
-                H-->>Cmp: throw Error('Undefined data') → nearest Error Boundary fallback shown
+                H-->>Cmp: throw ApiError('Response resolved with no data', 'EMPTY_DATA') → nearest Error Boundary fallback shown
             end
         else rejected (ApiError)
             React-->>Cmp: use(promise) throws the ApiError → nearest Error Boundary fallback shown
@@ -201,7 +201,7 @@ sequenceDiagram
                 alt data is defined
                     H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
                 else data === undefined (guard)
-                    H-->>Cmp: throw Error('Undefined data') → nearest Error Boundary fallback shown
+                    H-->>Cmp: throw ApiError('Response resolved with no data', 'EMPTY_DATA') → nearest Error Boundary fallback shown
                 end
             else rejected (ApiError)
                 React-->>Cmp: use(newPromise) throws the ApiError → nearest Error Boundary fallback shown

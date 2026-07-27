@@ -47,15 +47,8 @@ export function useFetchFn<T>(
     error: null,
   });
 
-  const isMounted = useRef<boolean>(true);
+  const latestRequestIdRef = useRef(0);
   const fetchFnRef = useRef(fetchFn);
-
-  useEffect(() => {
-    isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
 
   // Why do we need fetchFnRef + this useEffect?
   //
@@ -118,6 +111,10 @@ export function useFetchFn<T>(
     async (execOptions: { isRefresh: boolean }): Promise<T | null> => {
       // Read fetchFn through the ref (fetchFnRef.current), NOT directly from the `fetchFn` closure variable.
       const fn = fetchFnRef.current;
+
+      // Claim a serial number for this run.
+      const requestId = ++latestRequestIdRef.current;
+
       setState((prev) => ({
         ...prev,
         isLoading: !execOptions.isRefresh,
@@ -143,7 +140,12 @@ export function useFetchFn<T>(
           data = await rawPromise;
         }
 
-        if (isMounted.current) {
+        // Only the newest run may write. Because `execute` is fed by sources that don't know about each other:
+        // the consumer's effect, a tag listener, a pull-to-refresh, etc,
+        // so several runs can be in flight at once against one shared state,
+        // and responses arrive in a different order than they were sent.
+        // Without this check the slowest run wins by landing last, which shows the OLDER data.
+        if (requestId === latestRequestIdRef.current) {
           setState({
             data: data ?? null,
             isLoading: false,
@@ -151,10 +153,11 @@ export function useFetchFn<T>(
             error: null,
           });
         }
+
         return data;
       } catch (error) {
         const apiError = error as ApiError;
-        if (isMounted.current) {
+        if (requestId === latestRequestIdRef.current) {
           setState({
             data: null,
             isLoading: false,

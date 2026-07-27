@@ -51,7 +51,7 @@ sequenceDiagram
     H->>Wire: await mutationFn(variables)
     Wire->>API: request (POST / PUT / DELETE)
 
-    alt success (mounted)
+    alt success
         API-->>H: HttpResponse { data }
         H->>H: setState(data, isMutating: false)
         opt invalidatesTags provided
@@ -65,7 +65,7 @@ sequenceDiagram
             end
         end
         H->>Cmp: onSuccess(data)   ← runs AFTER invalidateTags
-    else failure (mounted)
+    else failure
         API-->>H: ApiError (non-OK) / network error
         H->>H: setState(data:null, isMutating: false)
         H->>Cmp: onError(apiError)
@@ -118,9 +118,11 @@ which component issued the write.
   the caller's modeling decision; fetchwire treats every tag identically.
 - **`onSuccess` receives the unwrapped `data`.** The success callback is passed `response.data ?? null`,
   the same payload shape readers get.
-- **Unmounted mutations are dropped.** The `isMounted` guard means a mutation whose component unmounts
-  before the request settles skips `setState`, `invalidateTags`, and both callbacks — the result is
-  discarded.
+- **Unmounting the caller does not abandon the write.** A mutation whose component unmounts before the
+  request settles still invalidates its tags and still calls `onSuccess` / `onError`. Only `setState`
+  is lost, and only because React drops it — the cache and the caller's callbacks are not the
+  component's to cancel. Write `onSuccess` / `onError` so they tolerate running after their component
+  is gone: reach for a router, a store, or an alert rather than a `setState` the caller no longer owns.
 - **`reset()`** clears `{ data, isMutating }` back to idle. It does not touch the cache or emit anything.
 
 ---

@@ -4,6 +4,7 @@ import { eventEmitter } from "../core/event-emitter";
 import { promiseCacheStore } from "../core/promise-cache-store";
 import { extractHttpResponseData } from "../util/helper";
 import { fetchClient } from "../core/fetch-client";
+import { ApiError } from "../util/api-error";
 
 /**
  * A hook that fetches immediately on mount and suspends
@@ -123,7 +124,7 @@ export function useFetch<T>(
   const data = use(promise);
 
   if (data === undefined) {
-    throw new Error("Undefined data");
+    throw new ApiError("Response resolved with no data", "EMPTY_DATA");
   }
 
   return { data, refreshFetch, isRefreshing: isPending };

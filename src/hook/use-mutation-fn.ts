@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { ApiError } from '../util/api-error';
 import {
   HttpResponse,
@@ -91,14 +91,6 @@ export function useMutationFn<T, TVariables = void>(
     data: null,
     isMutating: false,
   });
-  const isMounted = useRef<boolean>(true);
-
-  useEffect(() => {
-    isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
 
   // Each time the consumer component renders, a brand new options object is created,
   // Which would cause the useEffect to re-run, even if the tags are the same.
@@ -129,28 +121,25 @@ export function useMutationFn<T, TVariables = void>(
       try {
         const response = await mutationFn(variables);
 
-        if (isMounted.current) {
-          setState({
-            data: response.data ?? null,
-            isMutating: false,
-          });
+        setState({
+          data: response.data ?? null,
+          isMutating: false,
+        });
 
-          if (invalidatesTagsKey) {
-            const tagsToInvalidate = invalidatesTagsKey.split(',');
-            fetchClient.invalidateTags(tagsToInvalidate);
-          }
-          executeOptions?.onSuccess?.(response.data ?? null);
+        if (invalidatesTagsKey) {
+          const tagsToInvalidate = invalidatesTagsKey.split(',');
+          fetchClient.invalidateTags(tagsToInvalidate);
         }
+        executeOptions?.onSuccess?.(response.data ?? null);
+
         return response;
       } catch (error) {
         const apiError = error as ApiError;
-        if (isMounted.current) {
-          setState({
-            data: null,
-            isMutating: false,
-          });
-          executeOptions?.onError?.(apiError);
-        }
+        setState({
+          data: null,
+          isMutating: false,
+        });
+        executeOptions?.onError?.(apiError);
         return null;
       }
     },

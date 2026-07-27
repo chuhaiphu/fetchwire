@@ -81,11 +81,14 @@ export interface WireConfig {
 
   /**
    * Optional function to transform the raw Error response from the server into the
-   * standardized `ApiError` shape.
+   * standardized `ApiError` shape. It receives the parsed error body exactly as the server
+   * sent it — nothing is filled in or filtered first — so a `string[]` message or a nested
+   * `error` object is readable here. An `ApiError` returned without a `statusCode` gets the
+   * response status.
    *
-   * If not provided, fetchwire will assume the error response has the standard structure
-   *
-   * `{ message: string, error: string, statusCode: number }`.
+   * If not provided, fetchwire reads `message` and `error` off the body, using each only when
+   * it is a `string` and falling back to `HTTP <status>` / `"HTTP_ERROR"` otherwise.
+   * `statusCode` always comes from the HTTP response, never from the body.
    */
   transformError?: (error: unknown) => ApiError;
   /**

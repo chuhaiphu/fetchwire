@@ -507,18 +507,27 @@ type HttpResponse<T> = {
 }
 ```
 
-If the response body cannot be parsed as JSON or a network error occurs, fetchwire falls back to a synthetic error with:
+When the request itself fails or the response cannot be read as JSON, fetchwire throws a synthetic `ApiError` whose `errorCode` says which one happened:
 
-- `message`: from the thrown `Error` or `"Network error"`
-- `errorCode`: `"NETWORK_ERROR"`
-- `statusCode`: `520`
+| `errorCode` | When | `statusCode` |
+| --- | --- | --- |
+| `"NETWORK_ERROR"` | `fetch()` rejected — the request never completed | `520` |
+| `"EMPTY_BODY"` | The response completed with no body on a status that requires one (anything but `204` / `205`). The message carries the `content-length` header, which tells you whether the sender sent nothing (`0`) or the body was lost in transport (absent / non-zero). | the real status |
+| `"INVALID_JSON"` | The body has content but is not JSON — typically a proxy's HTML error page | the real status |
+| `"HTTP_ERROR"` | A non-OK response whose body carried no string `error` field of its own | the real status |
+
+On a non-OK response, `statusCode` always comes from the HTTP response, never from the body. With no `transformError` configured, `message` and `error` are read off the body only when each is a `string`; otherwise they fall back to `HTTP <status>` and `"HTTP_ERROR"`. If your API sends them in another shape (a `string[]` message, a nested `error` object), configure `transformError` — it receives the parsed body untouched.
+
+A `204 No Content` / `205 Reset Content` response is **not** an error: it resolves to `{ data: undefined, status, message: "" }`.
+
+Errors thrown by your own `onRequest`, `onResponse` or `transformResponse` are **not** wrapped — they propagate as themselves, because a bug in consumer code is not a transport failure.
 
 ### ApiError
 
-All errors are normalized to an `ApiError` instance. It extends `Error` and typically includes:
+Errors originating from the transport are normalized to an `ApiError` instance. It extends `Error` and typically includes:
 
 - `message: string`
-- `errorCode: string | undefined` (e.g. from server `error` field or `'NETWORK_ERROR'`)
+- `errorCode: string | undefined` (e.g. from server `error` field, or one of the codes above)
 - `statusCode: number | undefined` (e.g. 401, 403, 500, 520, etc.)
 
 ### Using ApiError in components
@@ -664,7 +673,7 @@ function initWire(config: WireConfig): void;
   - `onResponse(url, response)`: Called after every response, before the body is parsed. Use for logging, timing, or header inspection. Do not consume the response body — use `response.clone()` if needed. Can be async.
   - `onError(error)`: Called for **every** non-OK response — the single error sink. Branch on `error.statusCode` to handle specific cases (e.g. `401` → redirect to login, `403` → show "no permission", else → show a toast). Can be async.
 - **`transformError`** (optional): A function to normalize your backend error payload into an `ApiError` (`message`, `errorCode`, `statusCode`). Called on non-OK responses before the `onError` interceptor is executed.
-- **`transformResponse`** (optional): A function to normalize your API's response shape into fetchwire's standard `{ data?, message?, status? }` format. Useful when your backend uses a different envelope (e.g. `statusCode` instead of `status`). Called on every successful response before the data reaches your hooks.
+- **`transformResponse`** (optional): A function to normalize your API's response shape into fetchwire's standard `{ data?, message?, status? }` format. Called on every successful response before the data reaches your hooks. **Configure it whenever your API uses an envelope** (e.g. `{ statusCode, message, data }`) — without it fetchwire makes no assumption about your payload's shape: the parsed body becomes `data` as-is, `status` comes from the HTTP response, and `message` is empty.
 
 ### `updateWireConfig(configPartial)`
 
