@@ -1,5 +1,98 @@
 # Changelog
 
+## [5.3.0] - 2026-07-28
+
+No breaking changes — every call signature is unchanged.
+
+### Fixed
+
+- **`useMutationFn` reported successful writes as failures.**
+
+  The `try` wrapped the whole success path, so a throw after the response arrived was caught as if the
+  write itself had failed: the just-set `data` was wiped, `onError` fired **alongside** `onSuccess`, and
+  the caller got `null` for a mutation the server had already committed.
+
+  ```ts
+  executeMutationFn(payload, {
+    onSuccess: (data) => router.push(`/detail/${data.id}`), // throws → onError also fires
+  });
+  ```
+
+  Two ways it happened: `onSuccess` throwing, and — with no faulty consumer code at all — a reader
+  refreshed by `invalidateTags`, since `emit` runs its listeners synchronously and `useFetch`'s
+  `refreshFetch` calls the consumer's fetch callback directly.
+
+  A `try` cannot un-`POST` a committed write; it only controls the report. It now ends at the network
+  call, and the consequences of success run outside it.
+
+- **`useFetchFn` cached failed requests, so `executeFetchFn` could never recover.**
+
+  A rejected Promise stayed under `fetchKey`, and the cache-hit branch reuses whatever is stored without
+  inspecting it — so every later `executeFetchFn()` failed instantly without reaching the network, even
+  after connectivity came back. `execute` now removes the key when a run rejects; only the newest run may
+  delete.
+
+  `useFetch` deliberately keeps its rejected Promise: deleting it there would make the next render create
+  a fresh pending Promise, suspend, reject, delete, and suspend again.
+
+- **`useMutationFn` had no protection against overlapping runs.**
+
+  Two rapid submits let the slower run land last and overwrite the newer result, and whichever finished
+  first cleared `isMutating` while another was still in flight — re-enabling a submit button mid-write.
+  Runs now claim a serial number and resolve by **recency, not arrival**: only the newest writes state.
+  Tag invalidation and the per-call callbacks still run for every run, since they describe the server and
+  the caller rather than shared state.
+
+- **`reset()` could be undone by an in-flight request** — `useFetchFn` and `useMutationFn`.
+
+  A run that started before the reset still held the newest serial number, so its response wrote over the
+  state just cleared. `reset()` now retires every in-flight run first. It still does not touch the Promise
+  cache.
+
+- **`prefetch` dropped its `tags` when the key was already cached.**
+
+  The Promise cache and the tag map are separate stores. On a cache hit `prefetch` returned early, so
+  those `tags` never reached `tagToFetchKeysMap` and a later `invalidatesTags` found no key to clear.
+  `prefetch` now registers tags on the cache-hit path too — the fix applied to `useFetch` / `useFetchFn`
+  in 5.1.0, which did not cover `prefetch`.
+
+- **`onError` could receive something that was not an `ApiError`.**
+
+  `error as ApiError` is erased at compile time and checks nothing. Anything `wireApi` does not wrap — a
+  rejected `getToken()`, an `onRequest` / `onResponse` / `transformResponse` interceptor, an uninitialized
+  wire, or `mutationFn` throwing before the request is made — arrived with `statusCode` and `errorCode`
+  reading `undefined`, while the declared type told consumers not to guard.
+
+  `useFetchFn`'s `error` and `useMutationFn`'s `onError` now normalize the caught value, so the declared
+  type is true. An existing `ApiError` passes through untouched.
+
+### Changed
+
+- **`executeMutationFn` keeps a stable identity across renders.** `mutationFn` is read through a ref
+  instead of sitting in the `useCallback` deps, so an inline arrow — the documented usage — no longer
+  gives the callback a new identity on every render. This matches `useFetchFn`.
+
+- **`onSuccess` / `onError` are awaited.** `await executeMutationFn(...)` now settles only after the
+  callback has finished, and an `async` callback that rejects rejects `executeMutationFn` instead of
+  escaping as an unhandled rejection. `isMutating` still goes false earlier — it tracks the request, not
+  the callback.
+
+- **`fetchClient.invalidateTags` skips empty tag strings**, mirroring `registerTags`. An empty tag can
+  never map to a `fetchKey` or to a listener.
+
+### Documentation
+
+- Rewrote `USE-MUTATION-FN-FLOW` around the boundary of the `try`, with the success and failure paths as
+  separate flows.
+- Aligned all four architecture flows on one diagram vocabulary: shared participant names (the consumer's
+  callback and the server are now distinct), shared band labels, and shared section headings. Replaced the
+  invented `Path A` / `Path B` labels with the function names they describe.
+- Corrected "a refresh bypasses the cache" throughout — a refresh **skips the cache read and overwrites
+  the entry**.
+- Documented behavior that was previously undocumented: a repeat `executeFetchFn()` resolves from the
+  cache without a request, a tag event refreshes a `useFetchFn` that never fetched, and the argument
+  dispatch of `executeMutationFn` relies on `mutationFn.length`.
+
 ## [5.2.0] - 2026-07-27
 
 ### Breaking Changes

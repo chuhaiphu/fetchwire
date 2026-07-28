@@ -4,88 +4,167 @@ The **write** hook: run an async mutation, track `isMutating`, and — on succes
 every mounted reader ([`useFetch`](./USE-FETCH-FLOW.md) / [`useFetchFn`](./USE-FETCH-FN-FLOW.md))
 subscribed to those tags re-reads.
 
-> **The one idea that defines this flow.** A mutation's success does two things in one pass: it **clears
-> the cached promises** of every `fetchKey` associated with the invalidated tags, and it **emits** those
-> tags so mounted readers refetch. Writes and reads never reference each other directly — they are wired
-> only through shared tag strings.
+> **The one idea that defines this flow.** A fetch is a **resource**, so it has an identity (`fetchKey`)
+> and can be cached. A mutation is an **action** — it has no identity, so this hook never reads or writes
+> `promiseCacheStore` for itself, and calling it twice really does send two requests. What it owns instead
+> is the mutation's _after-effect_: on success it **clears the cached promises** of every `fetchKey`
+> associated with the invalidated tags, and **emits** those tags so mounted readers refetch. Writes and
+> reads never reference each other directly — they are wired only through shared tag strings.
+
+> Everything below turns on where the `try` **ends** inside `executeMutationFn`
+> ([use-mutation-fn.ts](../../src/hook/use-mutation-fn.ts)):
+>
+> ```
+> try   { response = await fn(variables) }   → the mutation ITSELF
+> catch { normalizeToApiError → setState → onError }  → the mutation FAILED
+> ─────────────────────────────────────────────── the try ends HERE
+> setState → invalidateTags → onSuccess       → the CONSEQUENCES of success
+> ```
+>
+> A `try` has no power over the server: it cannot un-`POST` a committed write. The only thing it controls
+> is the **report**. Widen it past the network call and a throw in the consequences turns a successful
+> write into a false failure report.
 
 ---
 
 ## Where it fits
 
+Read the map as three bands: **PENDING** (the flag goes on, a serial number is claimed), the network call
+(the only thing inside `try`), then **SETTLED** (`fulfilled` / `rejected`). The sequence diagrams below
+preserve the same three bands.
+
 ```mermaid
 flowchart LR
-    User["User action"] --> EXE["executeMutationFn(vars?, opts?)"]
-    EXE --> MUT["await mutationFn(vars) → wireApi"]
-    MUT -->|"resolved"| INV["invalidateTags(tags)"]
-    MUT -->|"threw"| ERR["onError(ApiError)"]
-    INV --> CLR["clear cache for each fetchKey<br/>mapped to the tags"]
-    INV --> EMIT["eventEmitter.emit(tag)"]
+    Cmp["Consumer Component"] -->|"user action"| EXE["executeMutationFn(vars?, opts?)"]
+    EXE --> PEND["PENDING<br/>setState(isMutating: true)<br/>requestId = ++latestRequestIdRef.current"]
+    PEND --> TRY{"await fn(variables)<br/>the ONLY statement inside try"}
+
+    TRY -->|"rejected"| ERRS["apiError = normalizeToApiError(error)<br/>setState { data: null, isMutating: false }<br/>onError(apiError) → return null"]
+
+    TRY -->|"fulfilled"| OKS["setState { data, isMutating: false }"]
+    OKS --> INV["invalidateTags(tags)"]
+    INV --> CLR["JOB 1 — delete every fetchKey<br/>mapped to the tag"]
+    INV --> EMIT["JOB 2 — eventEmitter.emit(tag)"]
     EMIT --> RD["mounted readers subscribed<br/>to the tag → refresh"]
-    INV --> OK["onSuccess(data)"]
+    INV --> OK["onSuccess(data) → return response"]
 ```
 
-The **cache clear** and the **emit** are complementary: the emit refreshes readers that are _mounted
-now_; the clear guarantees a reader that mounts _later_ starts from a fresh fetch instead of a stale
-cached promise.
+The **cache clear** and the **emit** are complementary: the emit refreshes readers that are _mounted now_;
+the clear guarantees a reader that mounts _later_ starts from a fresh fetch instead of a stale cached
+promise.
 
 ---
 
-## The flow — execute, then fan out
+## executeMutationFn — Success
+
+The mutation resolves, so the hook publishes the result and then runs the two consequences — invalidation
+first, `onSuccess` second.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Cmp as Consumer Component
     participant H as useMutationFn
-    participant Wire as wireApi
-    participant API as Server
+    participant Fn as mutation callback (consumer-supplied)
+    participant API as Server (via wireApi)
     participant FC as fetchClient
     participant Cache as promiseCacheStore
     participant EM as eventEmitter
     participant RD as Mounted readers
 
     Cmp->>H: executeMutationFn(variables?, { onSuccess, onError })
-    H->>H: setState(isMutating: true)
 
-    H->>Wire: await mutationFn(variables)
-    Wire->>API: request (POST / PUT / DELETE)
+    rect rgba(128,128,128,0.12)
+        Note over Cmp,RD: PENDING — the flag goes on, and this run claims a serial number
+        H->>H: fn = mutationFnRef.current — the latest mutationFn, read at call time
+        H->>H: hasVariables = fn.length is non-zero — decides whether arg 1 is variables or options
+        H->>H: requestId = ++latestRequestIdRef.current
+        H->>H: setState(isMutating: true) — data from the previous run is left in place
+    end
 
-    alt success
-        API-->>H: HttpResponse { data }
-        H->>H: setState(data, isMutating: false)
+    Note over H,API: INSIDE `try` — the network call, and nothing else.<br/>`fn` is the consumer's callback, invoked exactly ONCE.
+    H->>Fn: await fn(variables)
+    Fn->>API: request (POST / PUT / DELETE)
+    API-->>Fn: 2xx
+    Fn-->>H: HttpResponse { data, message, status }
+
+    rect rgba(128,128,128,0.12)
+        Note over Cmp,RD: SETTLED — OUTSIDE `try`. Everything here is a consequence of a write<br/>the server has already committed and no one can roll back.
+        H->>H: setState(data: response.data ?? null, isMutating: false)
+        Note over H,FC: this setState — and ONLY this setState — is inside<br/>`if (requestId === latestRequestIdRef.current)`
+
         opt invalidatesTags provided
-            H->>FC: invalidateTags(tags)
-            loop each tag
-                FC->>Cache: delete every fetchKey mapped to this tag
-                FC->>FC: drop the tag → fetchKeys entry<br/>(cache-key index only, not the subscribers)
+            H->>FC: invalidateTags(invalidatesTagsKey.split(','))
+            loop each non-empty tag
+                Note over FC,Cache: JOB 1 — cache level, serves readers that are NOT mounted
+                FC->>Cache: delete(fetchKey) for every key mapped to the tag
+                FC->>FC: tagToFetchKeysMap.delete(tag)
+
+                Note over EM,RD: JOB 2 — component level, serves readers that ARE mounted
                 FC->>EM: emit(tag)
-                EM->>RD: notify subscribers → refreshFetch / refreshFetchFn
+                EM->>RD: refreshFetch / refreshFetchFn — invoked synchronously on EVERY listener of that tag
                 RD->>API: each mounted reader re-reads (see its own flow)
             end
         end
-        H->>Cmp: onSuccess(data)   ← runs AFTER invalidateTags
-    else failure
-        API-->>H: ApiError (non-OK) / network error
-        H->>H: setState(data:null, isMutating: false)
-        H->>Cmp: onError(apiError)
+
+        H->>Cmp: await onSuccess(response.data ?? null)
+        Note over H,Cmp: awaited, so the returned Promise settles only once the callback has finished.<br/>isMutating is already false — it tracks the request, not the callback.
+        H-->>Cmp: return the full HttpResponse — not the unwrapped data
     end
 ```
 
-> **Why invalidate runs _before_ `onSuccess`.** By the time `onSuccess` runs, the cache has already
-> been cleared and readers already notified — so any navigation or UI update we do in `onSuccess`
-> happens on top of an already-invalidated cache, not a stale one.
+> **Why invalidation runs _before_ `onSuccess`.** By the time `onSuccess` runs, the cache is already
+> cleared and readers already notified — so any navigation or UI update it performs happens on top of an
+> already-invalidated cache, not a stale one.
 
-> **Why `invalidateTags` both clears _and_ emits.** An emit alone would refresh only mounted readers; an
-> unmounted reader would keep its stale cached promise and show old data when it remounts. Clearing the
-> cache for the tag's `fetchKey`s closes that gap — the next mount re-fetches. The two together cover
-> both "visible now" and "mounted later".
+---
 
-> **Why dropping the tag → fetchKeys entry doesn't break the `emit`.** The two live in _separate_
-> registries. The `tag → fetchKeys` entry is only a cache-key index — it says which cached promises to
-> delete; once they're gone it's stale, so it's dropped and later rebuilt when readers re-register via
-> `cachePromiseAndRegisterTags`. The `emit` walks `eventEmitter`'s own subscriber list, which the drop never
-> touches — so mounted readers still get notified.
+## executeMutationFn — Failure
+
+The `await` rejects. Nothing is invalidated, `onSuccess` never runs, and the thrown value is **normalized**
+before it reaches the consumer.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cmp as Consumer Component
+    participant H as useMutationFn
+    participant Fn as mutation callback (consumer-supplied)
+    participant API as Server (via wireApi)
+
+    Cmp->>H: executeMutationFn(variables?, { onSuccess, onError })
+
+    rect rgba(128,128,128,0.12)
+        Note over Cmp,API: PENDING — identical to the success path, the branch is not decided yet
+        H->>H: fn = mutationFnRef.current — the latest mutationFn, read at call time
+        H->>H: requestId = ++latestRequestIdRef.current
+        H->>H: setState(isMutating: true)
+    end
+
+    Note over H,API: INSIDE `try` — the network call, and nothing else.
+    H->>Fn: await fn(variables)
+
+    alt non-OK response — an exchange completed
+        Fn->>API: request
+        API-->>Fn: 4xx / 5xx
+        Fn-->>H: wireApi throws ApiError (statusCode from the response)
+    else no exchange at all
+        Fn->>API: request never completes (DNS, TLS, refused, timeout, abort)
+        Fn-->>H: wireApi throws ApiError — errorCode 'NETWORK_ERROR', statusCode 520
+    else thrown from somewhere wireApi does not wrap
+        Note over Fn,H: a rejected getToken(), an onRequest / onResponse / transformResponse<br/>interceptor, an uninitialized wire
+        Fn-->>H: the raw thrown value
+    end
+
+    rect rgba(128,128,128,0.12)
+        Note over Cmp,API: SETTLED — the failure branch. No tag is invalidated and onSuccess never runs.
+        H->>H: apiError = normalizeToApiError(error) — pass an ApiError through untouched, otherwise wrap it
+        H->>H: setState(data: null, isMutating: false)
+        Note over H,API: this setState — and ONLY this setState — is inside<br/>`if (requestId === latestRequestIdRef.current)`
+        H->>Cmp: await onError(apiError)
+        H-->>Cmp: return null — the only way this hook reports failure to an awaiting caller
+    end
+```
 
 ---
 
@@ -104,26 +183,34 @@ flowchart TB
     K3 --> R3["reader on tripB refreshes"]
 ```
 
-A tag maps to a **set** of `fetchKey`s (built as readers register via `cachePromiseAndRegisterTags`). Invalidating
-one tag reaches **every** reader that ever subscribed to it — the fan-out is by tag membership, not by
-which component issued the write.
-
 ---
 
 ## Notes
 
-- **Collection vs entity tags.** A broad tag (`'entity-list'`) refreshes _every_ reader of that
-  collection in one write — simple, at the cost of refetching readers that may not have changed. A
-  narrow, per-entity tag (`'entity-list-' + id`) refreshes exactly one. Choosing the granularity is
-  the caller's modeling decision; fetchwire treats every tag identically.
-- **`onSuccess` receives the unwrapped `data`.** The success callback is passed `response.data ?? null`,
-  the same payload shape readers get.
+- **Callbacks are awaited — so `isMutating` and the returned Promise mean different things.**
+  `onSuccess` / `onError` may return a Promise, and `executeMutationFn` waits for it. So
+  `await executeMutationFn(...)` means "the write **and** everything the caller queued after it are
+  done", while `isMutating` went false earlier — it tracks the **request**, not the callback. A callback
+  that rejects rejects `executeMutationFn` (it does **not** route to `onError`, which lives inside the
+  narrowed `try`).
+- **Overlapping runs resolve by recency, not by arrival.** Two `executeMutationFn()` calls produce two
+  independent requests writing one state. The newer run always wins, whichever response lands last — but
+  both runs still invalidate their tags and still call their own callbacks.
+- **Collection vs entity tags.** A broad tag (`'entity-list'`) refreshes _every_ reader of that collection
+  in one write — simple, at the cost of refetching readers that may not have changed. A narrow, per-entity
+  tag (`'entity-list-' + id`) refreshes exactly one. Choosing the granularity is the caller's modeling
+  decision; fetchwire treats every tag identically.
+- **`onSuccess` receives the unwrapped `data`; the return value keeps the envelope.** The callback is
+  passed `response.data ?? null` — the same payload shape readers get — while `executeMutationFn` returns
+  the whole `HttpResponse`, so `message` and `status` stay reachable.
 - **Unmounting the caller does not abandon the write.** A mutation whose component unmounts before the
-  request settles still invalidates its tags and still calls `onSuccess` / `onError`. Only `setState`
-  is lost, and only because React drops it — the cache and the caller's callbacks are not the
-  component's to cancel. Write `onSuccess` / `onError` so they tolerate running after their component
-  is gone: reach for a router, a store, or an alert rather than a `setState` the caller no longer owns.
-- **`reset()`** clears `{ data, isMutating }` back to idle. It does not touch the cache or emit anything.
+  request settles still invalidates its tags and still calls `onSuccess` / `onError`. Only `setState` is
+  lost, and only because React drops it — the cache and the caller's callbacks are not the component's to
+  cancel. Write `onSuccess` / `onError` so they tolerate running after their component is gone: reach for
+  a router, a store, or an alert rather than a `setState` the caller no longer owns.
+- **`reset()`** returns state to the idle shape (`data:null, isMutating:false`) and retires every in-flight
+  run, so a late response cannot resurrect what was just cleared. It does not touch the Promise cache and
+  emits nothing.
 
 ---
 

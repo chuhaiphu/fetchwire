@@ -7,10 +7,8 @@ import { fetchClient } from "../core/fetch-client";
 import { ApiError } from "../util/api-error";
 
 /**
- * A hook that fetches immediately on mount and suspends
- * the component while data is loading. The parent tree must have a
- * `<Suspense>` boundary (for the loading state) and an `<ErrorBoundary>`
- * (for API errors).
+ * A hook that fetches immediately on mount and suspends the component while data is loading.
+ * The parent tree must have a `<Suspense>` boundary and an `<ErrorBoundary>`.
  *
  * @example
  * ```tsx
@@ -23,16 +21,16 @@ import { ApiError } from "../util/api-error";
  * ```
  *
  * @param fetch - A Promise-returning function `() => Promise<HttpResponse<T> | T>`.
- *   fetchwire calls it automatically on mount to start the fetch, and again on
- *   every `refreshFetch()` or tag invalidation. Return either an `HttpResponse<T>`
- *   envelope or the raw data `T`.
+ *   fetchwire calls it automatically on mount to start the fetch,
+ *   and again on every `refreshFetch()` or tag invalidation.
+ *   Return either an `HttpResponse<T>` envelope or the raw data `T`.
  * @param options - Options for this hook.
- *   - `fetchKey` — a unique key that caches this request's Promise. If `prefetch()`
- *     ran with the same key beforehand, the hook reuses the cached Promise instead
- *     of firing a new request.
- *   - `tags` — an optional list of tag strings this request subscribes to. When a
- *     `useMutationFn` invalidates a matching tag via `invalidatesTags`, the hook
- *     refreshes automatically. Tag strings must not contain commas.
+ *   - `fetchKey` — a unique key that caches this request's Promise.
+ *     If `prefetch()` ran with the same key beforehand, the hook will reuses the cached Promise instead.
+ *   - `tags` — an optional list of tag strings this request subscribes to.
+ *     When a `useMutationFn` invalidates a matching tag via `invalidatesTags`,
+ *     the hook refreshes automatically.
+ *     Tag strings must not contain commas.
  *
  * @returns
  *   - `data` — the resolved value of type `T`, or null.

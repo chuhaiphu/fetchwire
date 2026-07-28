@@ -50,21 +50,17 @@ class FetchClient {
     tags?: string[],
   ) {
     // Why do we need this?
-    // 1. A cached promise is meant to be READ by React's `use(promise)` during render;
+    // 1. A cached promise is meant to be READ by React's `use(promise)` during render.
     //    that read is what throws a rejection to the nearest <ErrorBoundary>.
-    // 2. But a refresh triggered by a tag event (useFetch.refreshFetch) creates the promise
-    //    OUTSIDE render and only schedules a re-render to read it on the next pass.
+    // 2. But a refresh triggered by a tag event creates the promise OUTSIDE render,
+    //    it only schedules a re-render to read it on the next pass.
     // 3. If the reader unmounts before that re-render runs
     //    — e.g. it navigates away right after firing the mutation that invalidated the tag — 
     //    `use()` will never able to reads the promise, so nothing consumes the rejection.
-    // 4. A rejected promise with no handler by the end of the microtask is reported by the
-    //    runtime as an "Unhandled promise rejection" .
+    // 4. A rejected promise with no handler is reported as an "Unhandled promise rejection".
     //
     // What this line does:
     // `promise.catch(() => {})` registers a rejection handler on the promise we are about to cache.
-    // `void` discards the new promise that `.catch` returns.
-    // we are not chaining anything, we only want the side effect:
-    // "this promise now has a rejection handler attached."
     // It runs once, synchronously, every time a promise enters the cache.
     void promise.catch(() => {});
 
@@ -80,6 +76,8 @@ class FetchClient {
    */
   invalidateTags(tags: string[]) {
     tags.forEach((tag) => {
+      if (!tag) return;
+
       const associatedFetchKeys = this.tagToFetchKeysMap.get(tag);
       if (associatedFetchKeys) {
         associatedFetchKeys.forEach((key) => promiseCacheStore.delete(key));

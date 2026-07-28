@@ -3,7 +3,7 @@ import { ApiError } from "../util/api-error";
 import { HttpResponse, FetchOptions } from "../interface";
 import { eventEmitter } from "../core/event-emitter";
 import { promiseCacheStore } from "../core/promise-cache-store";
-import { extractHttpResponseData } from "../util/helper";
+import { extractHttpResponseData, normalizeToApiError } from "../util/helper";
 import { fetchClient } from "../core/fetch-client";
 
 interface FetchState<T> {
@@ -17,15 +17,14 @@ interface FetchState<T> {
  * A hook that runs a fetch on demand and tracks its loading, refreshing, and error state.
  *
  * @param fetchFn - A Promise-returning function `() => Promise<HttpResponse<T>>`.
- *   fetchwire does not call it on mount; it runs only when you call
- *   `executeFetchFn()` (initial fetch) or `refreshFetchFn()` (refresh).
+ *   fetchwire does not call it on mount.
+ *   fetchwire runs it only when you call `executeFetchFn()` (initial fetch) or `refreshFetchFn()` (refresh).
  * @param options - Options for this hook.
- *   - `fetchKey` — a unique key that caches this request's Promise. If `prefetch()`
- *     ran with the same key beforehand, the hook reuses the cached Promise instead
- *     of firing a new request.
- *   - `tags` — an optional list of tag strings this request subscribes to. When a
- *     `useMutationFn` invalidates a matching tag via `invalidatesTags`, the hook
- *     refreshes automatically. Tag strings must not contain commas.
+ *   - `fetchKey` — a unique key that caches this request's Promise.
+ *     If `prefetch()` ran with the same key beforehand, the hook reuses the cached Promise instead.
+ *   - `tags` — an optional list of tag strings this request subscribes to.
+ *      When a `useMutationFn` invalidates a matching tag via `invalidatesTags`, the hook refreshes automatically.
+ *      Tag strings must not contain commas.
  *
  * @returns
  *   - `data` — the resolved value of type `T`, or null if not yet fetched.
@@ -33,8 +32,10 @@ interface FetchState<T> {
  *   - `isRefreshing` — true while a refresh is in flight.
  *   - `error` — an `ApiError` if the last fetch failed, otherwise null.
  *   - `executeFetchFn` — manually triggers the initial fetch.
- *   - `refreshFetchFn` — manually triggers a refresh (bypasses the Promise cache).
- *   - `reset` — resets state back to the initial idle state.
+ *   - `refreshFetchFn` — manually triggers a refresh: skips the cache read and
+ *     overwrites the cached Promise with the new one.
+ *   - `reset` — resets state back to the initial idle state and retires every
+ *     in-flight run, so a late response cannot overwrite what was just cleared.
  */
 export function useFetchFn<T>(
   fetchFn: () => Promise<HttpResponse<T>>,
@@ -156,8 +157,17 @@ export function useFetchFn<T>(
 
         return data;
       } catch (error) {
-        const apiError = error as ApiError;
+        // Normalize instead of asserting: `error` is surfaced as `ApiError` in this hook's
+        // return value, so the consumer reads `statusCode` / `errorCode` without guarding.
+        // Anything wireApi does not wrap — a rejected getToken(), an interceptor, this
+        // callback throwing before it reaches the network — would otherwise arrive wearing a
+        // type it does not have.
+        const apiError = normalizeToApiError(error);
         if (requestId === latestRequestIdRef.current) {
+          // Do not leave a failed Promise in the cache.
+          // The cache-hit branch above reuses whatever sits under `fetchKey`,
+          // so a rejected Promise make every later `executeFetchFn()` fail forever without reaching the network.
+          fetchClient.remove(fetchKey);
           setState({
             data: null,
             isLoading: false,
@@ -181,6 +191,8 @@ export function useFetchFn<T>(
   );
 
   const reset = useCallback(() => {
+    // Retire every in-flight run.
+    latestRequestIdRef.current++;
     setState({
       data: null,
       isLoading: false,

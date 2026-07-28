@@ -14,15 +14,16 @@ in-flight promise under a `fetchKey`, and let the later [`useFetch`](./USE-FETCH
 
 ```mermaid
 flowchart LR
-    User["User taps a row"] --> H["handler: await prefetch(fn, { fetchKey })"]
+    User["User taps a row"] --> H["handler: prefetch(fn, { fetchKey })<br/>NOT awaited"]
     H --> HIT{"cache has(fetchKey)?"}
-    HIT -->|"yes"| RET["return cached promise (dedupe)"]
-    HIT -->|"no"| RUN["fn() → store promise under fetchKey"]
-    RUN --> AWAIT["await → resolves in background"]
-    RET --> NAV["router.push(detail)"]
-    AWAIT --> NAV
+    HIT -->|"yes"| DEDUPE["reuse cached promise (dedupe)<br/>register tags → fetchKey"]
+    HIT -->|"no"| NEW["fn() → cache promise<br/>register tags → fetchKey"]
+    DEDUPE --> WARM["promise lives under fetchKey<br/>transit runs in the background"]
+    NEW --> WARM
+    H --> NAV["router.push(detail) — runs immediately,<br/>it does not wait for the promise"]
     NAV --> MOUNT["detail mounts → useFetch(fetchKey)"]
-    MOUNT --> REUSE["cache hit → no new request"]
+    MOUNT --> REUSE["reuse cached promise<br/>register tags → fetchKey"]
+    WARM -.->|"same fetchKey"| REUSE
 ```
 
 The **same `fetchKey`** is the contract: the value passed to `prefetch` must match the one the
@@ -36,29 +37,39 @@ destination reader uses, or the reader will fetch again on its own.
 sequenceDiagram
     autonumber
     actor User
+    participant Cmp as Consumer Component
     participant PF as prefetch()
-    participant Wire as wireApi
-    participant API as Server
+    participant Fn as fetch callback (consumer-supplied)
+    participant API as Server (via wireApi)
     participant FC as fetchClient
     participant Cache as promiseCacheStore
 
-    User->>PF: prefetch(fetchFn, { fetchKey, tags })
+    User->>Cmp: taps a row
+    Cmp->>PF: prefetch(fetchFn, { fetchKey, tags })
 
-    alt cache HIT — has(fetchKey)
+    PF->>Cache: has(fetchKey)
+
+    alt cache HIT — key already warm
+        Cache-->>PF: true
         PF->>Cache: get(fetchKey)
-        Cache-->>PF: existing promise
-        PF-->>User: return cached promise (no new request)
+        Cache-->>PF: existing promise — pending, fulfilled, OR already rejected
+        PF->>FC: registerTags(fetchKey, tags)
+        PF-->>Cmp: return the cached promise (no new request)
     else cache MISS — cold key
-        PF->>Wire: fetchFn()
-        Wire->>API: request (starts in background)
-        PF->>PF: promise = fetchFn().then(extractHttpResponseData)
+        Cache-->>PF: false
+
+        Note over PF,API: `fetchFn` is the consumer's callback, invoked exactly ONCE.<br/>.then only derives a new promise — it issues no extra request.
+        PF->>Fn: fetchFn()
+        Fn->>API: HTTP request
+        Fn-->>PF: promise A (pending)
+        PF->>PF: promise = A.then(extractHttpResponseData)
+
         PF->>FC: cachePromiseAndRegisterTags(fetchKey, promise, tags)
+        FC->>FC: void promise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.<br/>The promise stays rejected — use() still throws to the Error Boundary.
         FC->>Cache: set(fetchKey, promise)
         FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
-        PF-->>User: return promise
+        PF-->>Cmp: return promise
     end
-
-    Note over User,Cache: promise now lives under fetchKey —<br/>whoever later reads the same key will get it
 ```
 
 > **`has(fetchKey)`.** If the key is already warm (a previous prefetch, or a reader is
@@ -77,31 +88,29 @@ flowchart TB
     subgraph with["With prefetch (overlap)"]
         B1["tap"] --> B2["fetch starts"]
         B1 --> B3["navigate + mount"]
-        B2 --> B4["render (cache hit)"]
+        B2 --> B4["cache hit → render"]
         B3 --> B4
     end
 ```
-
-> **Why this matters.** Fetching lazily inside render delays the network request until after mount and can
-> chain into waterfalls. `prefetch` moves the request to the earliest moment the intent is known — the
-> tap — so transit time overlaps navigation instead of following it.
 
 ---
 
 ## Notes
 
-- **Not a hook — a cache write.** `prefetch` can be called from any imperative context (event handler,
+- **Not a hook** `prefetch` can be called from any imperative context (event handler,
   navigation callback). It has no React state and no subscription; it only seeds `promiseCacheStore`.
 - **The key is the whole contract.** Hand-off works only when `prefetch`'s `fetchKey` is byte-for-byte
   the one the destination [`useFetch`](./USE-FETCH-FLOW.md)/[`useFetchFn`](./USE-FETCH-FN-FLOW.md) uses.
   A mismatch silently degrades to a normal (duplicate) fetch.
-- **Tag registration should match the prefetch's tags.** `prefetch` and the reader that consumes the same `fetchKey`
-  should declare the **same** `tags`. Tag associations _accumulate as a union_ (not overridden), so
-  differing tags just make the key invalidatable by _both_ sets — an extra (safe) refetch on next mount,
-  never stale data. Still, we should keep them identical so "what invalidates this key" has one obvious answer.
-- **First read reuses it; a refresh bypasses it.** A reader's _initial_ fetch honors the cache hit; an
-  explicit `refreshFetch`/`refreshFetchFn` always goes to the network. So a warmed key speeds up the
-  first paint without pinning stale data.
+- **Tags register on every call.** The promise cache and the tag map
+  (`tagToFetchKeysMap`) are independent; a warm key means only the first one is already done, so
+  `prefetch` registers `tags` on the cache-hit path too. Registrations _accumulate as a union_ (never
+  overridden), so `prefetch` and the reader consuming the same `fetchKey` should declare the **same**
+  `tags` — differing sets only make the key invalidatable by _both_, an extra (safe) refetch rather
+  than stale data.
+- **First read reuses it; a refresh replaces it.** A reader's _initial_ fetch honors the cache hit; an
+  explicit `refreshFetch`/`refreshFetchFn` skips the cache read and overwrites the entry. So a warmed key
+  speeds up the first paint without pinning stale data.
 
 ---
 

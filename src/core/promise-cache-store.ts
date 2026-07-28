@@ -1,10 +1,9 @@
 /**
  * A `Map`-backed store that caches in-flight Promises by string key.
  *
- * Used internally by `useFetch` to ensure the same Promise is reused across
- * re-renders during suspension — without this, React would create a new
- * pending Promise on every re-render and the component would suspend
- * indefinitely.
+ * Used internally by `useFetch` to ensure the same Promise is reused across re-renders.
+ * Without this, React would create a new pending Promise on every re-render,
+ * causing the component to suspend indefinitely.
  */
 class PromiseCacheStore {
   private cacheMap = new Map<string, Promise<unknown>>();

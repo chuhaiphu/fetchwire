@@ -1,5 +1,6 @@
 import { HttpResponse, WireRequestInit } from "../interface";
 import { ApiError } from "../util/api-error";
+import { normalizeToApiError } from "../util/helper";
 import { getWireConfig } from "./config";
 
 // `statusCode` is absent on purpose; fetchwire never takes the status from the body.
@@ -16,8 +17,7 @@ interface JsonErrorResponseBody {
  *
  * @throws {ApiError} with `errorCode`:
  *   - `"NETWORK_ERROR"` — `fetch()` itself rejected; the request never completed.
- *   - `"EMPTY_BODY"` — the response completed with no body on a status that requires one
- *     (anything but 204/205). The message carries the `content-length` header.
+ *   - `"EMPTY_BODY"` — the response completed with no body on a status other than 204 or 205.
  *   - `"INVALID_JSON"` — the body has content but is not JSON.
  *   - whatever `transformError` produces, for any non-OK response.
  *
@@ -69,11 +69,7 @@ export async function wireApi<T>(
     // fetch() rejects only when no HTTP exchange happened at all:
     // DNS failure, TLS failure, connection refused, timeout, abort.
     // A 404 or a 500 is a completed exchange, so it never reaches this catch.
-    throw new ApiError(
-      error instanceof Error ? error.message : "Network error",
-      "NETWORK_ERROR",
-      520,
-    );
+    throw normalizeToApiError(error, "NETWORK_ERROR", 520);
   }
 
   // Runs before the body is read, so the Response is still intact.
