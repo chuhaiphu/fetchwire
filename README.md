@@ -32,7 +32,7 @@ configure one.
 | **Cache warming** | `prefetch` starts a request before the component mounts, so the first read has nothing to wait for. |
 | **Manual cache control** | `fetchClient` — `invalidateTags()`, `remove()`, `clear()`. |
 
-### What fetchwire does have
+### What fetchwire lacks
 
 If you need any of the below features, reach for [TanStack Query](https://tanstack.com/query), [SWR](https://swr.vercel.app), or RTK Query instead.
 
