@@ -1,5 +1,123 @@
 # Changelog
 
+> Upgrade instructions live in [MIGRATION.md](./MIGRATION.md). This file records **what** changed and
+> **why**.
+
+## [6.0.0] - 2026-07-29
+
+fetchwire no longer invents a response shape. A request resolves the payload; the transport metadata
+stays on the `Response` that carried it.
+
+### Breaking Changes
+
+- **`HttpResponse<T>` removed. `wireApi` split into `wireData` and `wireRaw`.**
+
+  Every response was wrapped in `{ data, message, status }`, even for an API that has no envelope —
+  the default path fabricated one, `message: ""` included. That forced every field to be optional,
+  which in turn forced every consumer to unwrap and re-check.
+
+  The two entry points now say what they return. `wireData<T>` resolves the payload. `wireRaw<T>`
+  resolves `{ data, response }`, where `response` is the `Response` `fetch` returned — nothing is
+  copied out of it, so a copy can never drift from what the transport reported.
+
+  This follows the model ky and ofetch use: payload by default, the real response behind a second
+  entry point. Two functions rather than one function with a `raw` flag, because a flag produces
+  `T | WireRawResult<T>` — an untagged union with no runtime discriminant, which is the exact defect
+  this release removes.
+
+- **`transformResponse` returns the payload, not an envelope.**
+
+  `(json: unknown) => HttpResponse<unknown>` → `(json: unknown) => unknown`.
+
+  Handing the transform the job of building the envelope is what made `data` and `status` optional in
+  the first place, and it let a transform report a status that disagreed with the HTTP exchange. It
+  now takes the parsed body and returns the payload — the signature axios (`transformResponse`) and
+  RTK Query (`transformResponse`) both use. The status is no longer the transform's to set.
+
+  It is also no longer called when there is no body to parse.
+
+- **`204`, `205` and `HEAD` resolve `undefined`.**
+
+  They used to resolve `{ data: undefined, status, message: "" }` — an object, therefore always
+  truthy. The decision is now made from the status and the method **before** the body is read, so
+  "the server sent nothing" and "the body was lost in transport" stay distinguishable. Declare such
+  calls as `wireData<void>(...)`.
+
+- **`executeMutationFn(variables, options?)` — fixed positions.**
+
+  The two call shapes used to be told apart at runtime by `mutationFn.length`. That number is wrong
+  for a default parameter, a rest parameter, a `.bind()`, or any wrapper — and when it was wrong, the
+  variables were silently dropped. `variables` is now always argument 1 and the options always
+  argument 2; a mutation taking none leaves `TVariables` at its `void` default, so
+  `executeMutationFn()` still type-checks. This matches TanStack Query's `mutate(variables, options)`.
+
+  The two overloads collapse into one signature, and the documented "declare the parameter without a
+  default value" constraint is gone.
+
+- **`executeMutationFn` returns the payload.**
+
+  It returned the whole `HttpResponse<T>` while `onSuccess` received `response.data` — two names for
+  two different values out of one call. Both now carry whatever `mutationFn` resolved. `null` still
+  means the mutation failed.
+
+- **`EMPTY_DATA` removed.**
+
+  `useFetch` threw it when the resolved value was `undefined`. It existed only because
+  `HttpResponse.data` was optional; with no envelope there is no "resolved but empty" state.
+
+- **`useFetch`'s `data` narrowed from `T | null` to `T`.**
+
+  The hook suspends until the Promise settles, so there was never a "not yet" state to represent.
+  Widening callers (`data?.field`, `data ?? []`) still compile.
+
+### Added
+
+- **`wireRaw<T>(endpoint, options?)`** — resolves `{ data: T; response: Response }`. The way to read
+  `status`, `headers` or `redirected` for a single call now that no envelope carries them.
+
+### Fixed
+
+- **A `HEAD` request threw `EMPTY_BODY`.** The body was classified by whether the text was empty, so
+  a `HEAD` response — which never carries one (RFC 9110 §9.3.2) — was read as a broken response.
+
+- **Per-request headers were silently dropped unless they were a plain object.** `HeadersInit` is
+  `Headers | string[][] | Record<string, string>`, and the merge was an object spread, which handles
+  only the third form. A `new Headers({...})` or an array of pairs spread to `{}` and vanished.
+
+  Merging now goes through a single `Headers`-based helper, so all three forms behave identically.
+  Precedence is unchanged and explicit: global config → `Authorization` → per-request.
+
+- **`Content-Type: application/json` was attached to every request with a body.** That mislabelled
+  `FormData` (destroying the multipart boundary), `URLSearchParams` and `Blob`, and it forced a CORS
+  preflight on requests that did not need one. It is now derived from the body: a string body only.
+
+- **`prefetch<T>` lost its type parameter**, resolving `Promise<unknown> | undefined` regardless of
+  what `fetchFn` returned.
+
+### Changed
+
+- **`Accept: application/json, */*;q=0.8`** is now sent on every request, including bodyless ones.
+  `Accept` describes the response, which is why it is set where `Content-Type` is not — every
+  successful body is parsed as JSON. The `*/*;q=0.8` fallback keeps a strict-negotiating server from
+  answering `406 Not Acceptable`. axios sends an equivalent header unconditionally.
+
+- **`initWire` and `updateWireConfig` both normalize `headers` to a `Headers` instance**, so
+  `getWireConfig().headers` has one type regardless of how it was supplied.
+
+- **`util/helper.ts` split into `util/normalize-to-api-error.ts`.** Internal only; nothing exported
+  changed.
+
+### Documentation
+
+- Added [MIGRATION.md](./MIGRATION.md), covering every version with breaking changes. Migration
+  instructions were removed from this file.
+- Rewrote the README's response section around the payload, and documented behavior that had never
+  been written down: header precedence, `Content-Type` derivation, the `Accept` default, and how
+  bodiless responses resolve.
+- Updated all four architecture flows: removed the dead `EMPTY_DATA` branches and the
+  `extractHttpResponseData` step, and corrected `USE-MUTATION-FN-FLOW`, which stated the opposite of
+  the new `onSuccess` / return-value behavior.
+
 ## [5.3.0] - 2026-07-28
 
 No breaking changes — every call signature is unchanged.
@@ -121,19 +239,6 @@ No breaking changes — every call signature is unchanged.
   `transformResponse` docstring already said the default *"wraps the raw JSON as the `data` field"*,
   and `README` already pointed at `transformResponse` for envelope handling.
 
-  **Migration** — if your API uses an envelope and you relied on the implicit unwrap, declare it:
-
-  ```ts
-  initWire({
-    transformResponse: (json) => {
-      const body = json as { statusCode?: number; message?: string; data?: unknown };
-      return { data: body.data, status: body.statusCode, message: body.message };
-    },
-  });
-  ```
-
-  Projects that already configure `transformResponse` are unaffected.
-
 - **`ApiError.statusCode` no longer comes from the error body.**
 
   The non-OK branch resolved it as `body.statusCode ?? response.status`, letting a number the
@@ -149,9 +254,6 @@ No breaking changes — every call signature is unchanged.
   `statusCode` is now always `response.status`. It is the one field fetchwire holds first-hand, so
   it is never taken from the body — the same rule that removed the envelope guessing above.
 
-  **Migration** — none for a backend whose error `statusCode` mirrors the HTTP status. If yours
-  carries a domain code, read it in `transformError`, which receives the untouched body.
-
 - **`transformError` now receives the parsed body untouched.**
 
   It previously received a fetchwire-built object with `message` / `error` / `statusCode` filled in,
@@ -162,10 +264,6 @@ No breaking changes — every call signature is unchanged.
   With no `transformError` configured, the default `ApiError` now accepts a body value only when it
   is a `string` — `ApiError` extends `Error`, whose `message` must be one. A `string[]` message or an
   object `error` falls back to `HTTP <status>` / `"HTTP_ERROR"` instead of being coerced.
-
-  **Migration** — a `transformError` that assumed the fields were always present must handle their
-  absence; in exchange it now sees the real payload. Consumers without a `transformError` whose API
-  returns non-string `message` / `error` should add one.
 
 ### Fixed
 
@@ -184,17 +282,11 @@ No breaking changes — every call signature is unchanged.
   `content-length` header, which locates the loss without guesswork: `0` means the sender sent
   nothing; absent or non-zero means the body went missing after the headers arrived.
 
-  **Migration** — if you detected empty responses inside `transformResponse` (e.g. by testing for a
-  missing `statusCode`), delete that check: the case now fails earlier, as a typed error. If you
-  relied on receiving `{}`, catch `errorCode === "EMPTY_BODY"` instead.
-
 - **A non-JSON body was reported as a network error.**
 
   `JSON.parse` throwing a `SyntaxError` fell through to the outermost `catch`, which labelled it
   `NETWORK_ERROR` / `520`. A proxy's HTML error page served with a `2xx` was thus indistinguishable
   from a connection failure. It now throws `errorCode: "INVALID_JSON"` carrying the real status.
-
-  **Migration** — none, unless you matched on `NETWORK_ERROR` to catch malformed payloads.
 
 - **Bodiless error responses all collapsed to one hardcoded message.**
 
@@ -209,37 +301,26 @@ No breaking changes — every call signature is unchanged.
   The branch now reads the body as text — which never throws — so a bodiless error keeps its
   identity. See the two entries under **Breaking Changes** for what is built from it.
 
-  **Migration** — none by itself.
-
 - **Bugs in consumer code were relabelled as network errors.**
 
   The `try` block wrapped `onRequest`, `onResponse` and `transformResponse` alongside `fetch()`, so a
   `TypeError` in any of them surfaced as `NETWORK_ERROR` / `520`. Only the `fetch()` call is wrapped
-  now — the one failure that genuinely is a transport failure.
-
-  **Migration** — errors thrown from your interceptors or `transformResponse` now propagate as
-  themselves instead of as an `ApiError`. Code that assumed every rejection from `wireApi` is an
-  `ApiError` should narrow with `instanceof` rather than cast.
+  now — the one failure that genuinely is a transport failure. Errors thrown from your interceptors
+  or `transformResponse` therefore propagate as themselves instead of as an `ApiError`.
 
 - **`useFetchFn` let a slow response overwrite a newer one.**
 
   Overlapping runs — an effect, a tag listener, a pull-to-refresh — wrote one shared state in
   whatever order responses arrived, so the slowest run won by landing last. Each run now claims a
   serial number and writes only if it is still the newest; `isLoading` / `isRefreshing` follow the
-  same rule.
-
-  **Migration** — none. `execute` still resolves with its own result even when a newer run took over
-  the state.
+  same rule. `execute` still resolves with its own result even when a newer run took over the state.
 
 - **`useMutationFn` dropped `invalidateTags` and both callbacks when the caller unmounted mid-flight.**
 
   An `isMounted` ref gated everything after `await mutationFn(...)`, so a mutation that succeeded on
   the server could leave every reader on a stale cached promise and surface no error at all. The
-  guard is gone: unmounting now affects only `setState`, which React already no-ops.
-
-  **Migration** — `onSuccess` / `onError` now run in cases where they were silently skipped. Write
-  them to tolerate a gone component: a router, a store, or an alert rather than the caller's own
-  `setState`.
+  guard is gone: unmounting now affects only `setState`, which React already no-ops. `onSuccess` /
+  `onError` therefore run in cases where they were previously skipped.
 
 ---
 
@@ -255,16 +336,6 @@ No breaking changes — every call signature is unchanged.
 
   Most applications never call this method directly (they use `clear()` and `remove()`), so this
   affects only code that reached into `fetchClient` for a custom prefetch wrapper.
-
-  **Migration** — rename the call site:
-
-  ```ts
-  // Before (v5.0)
-  fetchClient.setFetchKeyToTags(fetchKey, promise, tags);
-
-  // After (v5.1)
-  fetchClient.cachePromiseAndRegisterTags(fetchKey, promise, tags);
-  ```
 
 ### Added
 
@@ -319,32 +390,6 @@ No breaking changes — every call signature is unchanged.
   non-OK response. The status-specific handlers added an extra concept (a cascade with a
   configurable status-code map) for something callers can express directly inside `onError`
   by branching on `error.statusCode`. The two handlers and the cascade have been removed.
-
-  **Migration** — fold the status-specific logic into `onError`:
-
-  ```ts
-  // Before (v4)
-  initWire({
-    // ...
-    interceptors: {
-      onUnauthorized: (error) => redirectToLogin(),
-      onForbidden: (error) => showNoPermission(),
-      onError: (error) => showToast(error.message),
-    },
-  });
-
-  // After (v5)
-  initWire({
-    // ...
-    interceptors: {
-      onError: (error) => {
-        if (error.statusCode === 401) return redirectToLogin();
-        if (error.statusCode === 403) return showNoPermission();
-        showToast(error.message);
-      },
-    },
-  });
-  ```
 
 - **Removed the `unauthorizedStatusCodes` and `forbiddenStatusCodes` config options.**
 
@@ -489,8 +534,6 @@ No breaking changes — every call signature is unchanged.
   prefetch(() => getTodosApi(), { fetchKey: "todos", tags: ["todos"] });
   ```
 
-  **Migration:** swap the argument order and move the key string into `{ fetchKey: '...' }`. Tags are now also supported directly in the `prefetch` call.
-
 - **`promiseCacheStore` is no longer a public export**
 
   `promiseCacheStore` is no longer exported from the package. For logout-flow cache clearing, use `fetchClient.clear()` instead.
@@ -510,8 +553,6 @@ No breaking changes — every call signature is unchanged.
     fetchClient.clear();
   }
   ```
-
-  **Migration:** replace `promiseCacheStore.clear()` with `fetchClient.clear()`. The `fetchClient.clear()` call also clears the internal tag-to-fetchKey map, ensuring no stale tag associations remain after logout.
 
 ### Added
 
@@ -581,8 +622,6 @@ No breaking changes — every call signature is unchanged.
   useFetch(getTodosApi, { fetchKey: "todos" });
   ```
 
-  **Migration:** move the string you were passing as the second argument into `options.fetchKey`.
-
 - **`useFetchFn`: `options` is now required, `fetchKey` is required**
 
   `options` was previously optional and `fetchKey` inside it was optional. Both are now required.
@@ -597,8 +636,6 @@ No breaking changes — every call signature is unchanged.
   useFetchFn(getTodosApi, { fetchKey: "todos" });
   useFetchFn(getTodosApi, { fetchKey: "todos", tags: ["todos"] });
   ```
-
-  **Migration:** add `fetchKey` to the options object for every `useFetchFn` call. Choose a key that uniquely identifies the resource (e.g. `'todos'`, `'user-' + userId`).
 
 - **`FetchOptions`: `fetchKey` is now required, field order changed**
 
@@ -707,20 +744,6 @@ No breaking changes — every call signature is unchanged.
 
   // After (3.3):
   onRequest?: (url: string, options: RequestInit) => void | Promise<void>;
-  ```
-
-  **Migration:** add `url` as the first parameter in any existing `onRequest` handler.
-
-  ```ts
-  // Before
-  onRequest: (requestInit) => {
-    requestInit.headers.set("x-request-id", crypto.randomUUID());
-  };
-
-  // After
-  onRequest: (url, requestInit) => {
-    requestInit.headers.set("x-request-id", crypto.randomUUID());
-  };
   ```
 
 - **`onError` now fires for 401/403 in addition to specific handlers**

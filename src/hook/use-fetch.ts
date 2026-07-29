@@ -1,10 +1,8 @@
 import { useEffect, useCallback, use, useState, useTransition } from "react";
-import { HttpResponse, FetchOptions } from "../interface";
+import { FetchOptions } from "../interface";
 import { eventEmitter } from "../core/event-emitter";
 import { promiseCacheStore } from "../core/promise-cache-store";
-import { extractHttpResponseData } from "../util/helper";
 import { fetchClient } from "../core/fetch-client";
-import { ApiError } from "../util/api-error";
 
 /**
  * A hook that fetches immediately on mount and suspends the component while data is loading.
@@ -20,10 +18,10 @@ import { ApiError } from "../util/api-error";
  * </ErrorBoundary>
  * ```
  *
- * @param fetch - A Promise-returning function `() => Promise<HttpResponse<T> | T>`.
+ * @param fetch - A Promise-returning function `() => Promise<T>`.
  *   fetchwire calls it automatically on mount to start the fetch,
  *   and again on every `refreshFetch()` or tag invalidation.
- *   Return either an `HttpResponse<T>` envelope or the raw data `T`.
+ *   Whatever it resolves **is** `data` — fetchwire never inspects or unwraps it.
  * @param options - Options for this hook.
  *   - `fetchKey` — a unique key that caches this request's Promise.
  *     If `prefetch()` ran with the same key beforehand, the hook will reuses the cached Promise instead.
@@ -33,23 +31,24 @@ import { ApiError } from "../util/api-error";
  *     Tag strings must not contain commas.
  *
  * @returns
- *   - `data` — the resolved value of type `T`, or null.
+ *   - `data` — the resolved value of type `T`.
  *   - `refreshFetch` — manually triggers a refresh while the component is mounted.
- *     Uses `useTransition` internally so the current data stays visible while the
- *     refresh loads. **Cannot be used to retry from an ErrorBoundary**: when the
- *     ErrorBoundary catches an API error the component is unmounted, so `refreshFetch`
- *     is inaccessible and its internal `setPromise` state update has no effect. To
- *     retry from an ErrorBoundary, call `fetchClient.remove(fetchKey)` inside the
- *     boundary's reset handler before remounting the component — this clears the
- *     rejected Promise from the Promise cache so the next mount starts a fresh fetch.
+ *     Uses `useTransition` internally so the current data stays visible while the refresh loads.
+ *     
+ *     **refreshFetch CANNOT be used to retry from an ErrorBoundary**:
+ *     when ErrorBoundary catches an API error the component is unmounted, so `refreshFetch` is inaccessible.
+ *     
+ *     To retry from an ErrorBoundary:
+ *     call `fetchClient.remove(fetchKey)` inside the boundary's reset handler, 
+ *     this clears the rejected Promise from the Promise cache so the next mount starts a fresh fetch.
  *   - `isRefreshing` — true while a refresh is in flight.
  */
 
 export function useFetch<T>(
-  fetch: () => Promise<HttpResponse<T> | T>,
+  fetch: () => Promise<T>,
   options: FetchOptions,
 ): {
-  data: T | null;
+  data: T;
   refreshFetch: () => void;
   isRefreshing: boolean;
 } {
@@ -73,21 +72,18 @@ export function useFetch<T>(
   // Set the promise in cache if not exists.
   // This ensures that the same promise is used across renders.
   if (!promiseCacheStore.has(fetchKey)) {
-    const rawPromise = fetch()
-      .then((res) => extractHttpResponseData(res))
-      .catch((error) => {
-        // Do NOT delete the resolved error-promise cache here.
-        // What if we delete the rejected promise from cache?
-        // 1. Each time the Component is rendered, a new Pending Promise from fetch is created
-        // 2. After use(promise) hook run, React will abort the current render, dispose all the states
-        // 3. React will render the Suspense fallback.
-        // 4. After the current rejected error-Promise is resolved, React will re-render the suspended component tree from scratch
-        // 5. The component will received a new Pending Promise and will suspend again.
-        // 6. The component will create an infinite loop of suspend-render-suspend-render...
-
-        // Keeping the rejected Promise in cache lets React propagate the error to the nearest ErrorBoundary on the next render.
-        throw error;
-      });
+    // ---
+    // A rejected Promise is cached too, and is deliberately NOT deleted here.
+    // What if we deleted the rejected promise from cache?
+    // 1. Each time the Component is rendered, a new Pending Promise from fetch is created
+    // 2. After use(promise) hook run, React will abort the current render, dispose all the states
+    // 3. React will render the Suspense fallback.
+    // 4. After the current rejected error-Promise is resolved, React will re-render the suspended component tree from scratch
+    // 5. The component will received a new Pending Promise and will suspend again.
+    // 6. The component will create an infinite loop of suspend-render-suspend-render...
+    //
+    // Keeping the rejected Promise in cache lets React propagate the error to the nearest ErrorBoundary on the next render.
+    const rawPromise = fetch();
     const tags = tagsKey.split(",");
     fetchClient.cachePromiseAndRegisterTags(fetchKey, rawPromise, tags);
   } else {
@@ -95,14 +91,14 @@ export function useFetch<T>(
   }
 
   // Get the cached promise
-  const [promise, setPromise] = useState<Promise<T | undefined>>(
+  const [promise, setPromise] = useState<Promise<T>>(
     () => promiseCacheStore.get(fetchKey) as Promise<T>,
   );
 
   const [isPending, startTransition] = useTransition();
 
   const refreshFetch = useCallback(() => {
-    const newPromise = fetch().then((res) => extractHttpResponseData(res));
+    const newPromise = fetch();
     const tags = tagsKey.split(",");
     fetchClient.cachePromiseAndRegisterTags(fetchKey, newPromise, tags);
     startTransition(() => {
@@ -119,11 +115,8 @@ export function useFetch<T>(
     return () => subscriptions.forEach((sub) => sub.remove());
   }, [tagsKey, refreshFetch]);
 
+  // Handed back untouched: the hook does not judge what `fetch` resolved.
   const data = use(promise);
-
-  if (data === undefined) {
-    throw new ApiError("Response resolved with no data", "EMPTY_DATA");
-  }
 
   return { data, refreshFetch, isRefreshing: isPending };
 }

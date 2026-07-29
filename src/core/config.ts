@@ -1,4 +1,5 @@
 import { WireConfig } from '../interface';
+import { mergeHeaders } from '../util/merge-headers';
 
 let globalWireConfig: WireConfig | null = null;
 
@@ -10,7 +11,8 @@ let globalWireConfig: WireConfig | null = null;
 export const initWire = (config: WireConfig): void => {
   globalWireConfig = {
     ...config,
-    headers: config.headers || {},
+    // `globalWireConfig.headers` is always a `Headers` no matter which of the three `HeadersInit`
+    headers: mergeHeaders(config.headers),
   };
 };
 
@@ -30,13 +32,7 @@ export const updateWireConfig = (config: Partial<WireConfig>): void => {
     // Add new config values,
     // overriding existing ones if duplicated
     ...config,
-    headers: {
-      // Copy existing headers
-      ...globalWireConfig.headers,
-      // Add new header values,
-      // overriding existing ones if duplicated
-      ...config.headers,
-    },
+    headers: mergeHeaders(globalWireConfig.headers, config.headers),
     interceptors: {
       // Copy existing interceptors
       ...globalWireConfig.interceptors,

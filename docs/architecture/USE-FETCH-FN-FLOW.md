@@ -113,7 +113,7 @@ sequenceDiagram
     participant Cmp as Consumer Component
     participant H as useFetchFn
     participant Fn as fetch callback (consumer-supplied)
-    participant API as Server (via wireApi)
+    participant API as Server (via wireData / wireRaw)
     participant FC as fetchClient
     participant Cache as promiseCacheStore
 
@@ -129,11 +129,11 @@ sequenceDiagram
     H->>Cache: has(fetchKey)
     Cache-->>H: false → cache MISS, no one warmed this key
 
-    Note over H,API: `fn` is the consumer's callback, invoked exactly ONCE.<br/>.then only derives a new promise — it issues no extra request.
+    Note over H,API: `fn` is the consumer's callback, invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
     H->>Fn: fn()
     Fn->>API: HTTP request
     Fn-->>H: promise A (pending)
-    H->>H: rawPromise = A.then(extractHttpResponseData)
+    H->>H: rawPromise = A — cached exactly as `fn` returned it, no derived promise
 
     H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, tagsKey.split(','))
     FC->>FC: void rawPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.
@@ -143,7 +143,7 @@ sequenceDiagram
     H->>H: data = await rawPromise
 
     API-->>Fn: response
-    Note over Fn,H: A settles → extractHttpResponseData runs → rawPromise settles → the await resumes
+    Note over Fn,H: A settles → the await resumes
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,Cache: SETTLED — a retired run writes nothing: it neither moves the data nor clears the flags
@@ -174,7 +174,7 @@ sequenceDiagram
     participant EM as eventEmitter
     participant H as useFetchFn
     participant Fn as fetch callback (consumer-supplied)
-    participant API as Server (via wireApi)
+    participant API as Server (via wireData / wireRaw)
     participant FC as fetchClient
     participant Cache as promiseCacheStore
 
@@ -202,11 +202,11 @@ sequenceDiagram
 
     Note over H,Cache: isRefresh makes the left operand false, so `&&` short-circuits and<br/>has(fetchKey) is never consulted — the cache read is skipped, not bypassed.
 
-    Note over H,API: `fn` is the consumer's callback, invoked exactly ONCE.<br/>.then only derives a new promise — it issues no extra request.
+    Note over H,API: `fn` is the consumer's callback, invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
     H->>Fn: fn()
     Fn->>API: HTTP request
     Fn-->>H: promise A (pending)
-    H->>H: rawPromise = A.then(extractHttpResponseData)
+    H->>H: rawPromise = A — cached exactly as `fn` returned it, no derived promise
 
     H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, tagsKey.split(','))
     FC->>FC: void rawPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.
@@ -215,7 +215,7 @@ sequenceDiagram
     H->>H: data = await rawPromise
 
     API-->>Fn: response
-    Note over Fn,H: A settles → extractHttpResponseData runs → rawPromise settles → the await resumes
+    Note over Fn,H: A settles → the await resumes
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,Cache: SETTLED — a retired run writes nothing: it neither moves the data nor clears the flags

@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ApiError } from "../util/api-error";
-import { HttpResponse, FetchOptions } from "../interface";
+import { FetchOptions } from "../interface";
 import { eventEmitter } from "../core/event-emitter";
 import { promiseCacheStore } from "../core/promise-cache-store";
-import { extractHttpResponseData, normalizeToApiError } from "../util/helper";
+import { normalizeToApiError } from "../util/normalize-to-api-error";
 import { fetchClient } from "../core/fetch-client";
 
 interface FetchState<T> {
@@ -16,9 +16,10 @@ interface FetchState<T> {
 /**
  * A hook that runs a fetch on demand and tracks its loading, refreshing, and error state.
  *
- * @param fetchFn - A Promise-returning function `() => Promise<HttpResponse<T>>`.
+ * @param fetchFn - A Promise-returning function `() => Promise<T>`.
  *   fetchwire does not call it on mount.
  *   fetchwire runs it only when you call `executeFetchFn()` (initial fetch) or `refreshFetchFn()` (refresh).
+ *   Whatever it resolves **is** `data` — fetchwire never inspects or unwraps it.
  * @param options - Options for this hook.
  *   - `fetchKey` — a unique key that caches this request's Promise.
  *     If `prefetch()` ran with the same key beforehand, the hook reuses the cached Promise instead.
@@ -38,7 +39,7 @@ interface FetchState<T> {
  *     in-flight run, so a late response cannot overwrite what was just cleared.
  */
 export function useFetchFn<T>(
-  fetchFn: () => Promise<HttpResponse<T>>,
+  fetchFn: () => Promise<T>,
   options: FetchOptions,
 ) {
   const [state, setState] = useState<FetchState<T>>({
@@ -133,7 +134,8 @@ export function useFetchFn<T>(
           fetchClient.registerTags(fetchKey, tagsKey.split(","));
           data = (await promiseCacheStore.get(fetchKey)) as T;
         } else {
-          const rawPromise = fn().then((res) => extractHttpResponseData(res));
+          // Cached exactly as `fetchFn` returned it — no unwrapping step.
+          const rawPromise = fn();
           const tags = tagsKey.split(",");
           // Cache the promise right away so if there is any fetch with the same fetchKey,
           // it will be served with promise from cacheMap instead of create a brand new promise.
@@ -159,9 +161,6 @@ export function useFetchFn<T>(
       } catch (error) {
         // Normalize instead of asserting: `error` is surfaced as `ApiError` in this hook's
         // return value, so the consumer reads `statusCode` / `errorCode` without guarding.
-        // Anything wireApi does not wrap — a rejected getToken(), an interceptor, this
-        // callback throwing before it reaches the network — would otherwise arrive wearing a
-        // type it does not have.
         const apiError = normalizeToApiError(error);
         if (requestId === latestRequestIdRef.current) {
           // Do not leave a failed Promise in the cache.

@@ -15,7 +15,7 @@ subscribed to those tags re-reads.
 > ([use-mutation-fn.ts](../../src/hook/use-mutation-fn.ts)):
 >
 > ```
-> try   { response = await fn(variables) }   → the mutation ITSELF
+> try   { result = await fn(variables) }     → the mutation ITSELF
 > catch { normalizeToApiError → setState → onError }  → the mutation FAILED
 > ─────────────────────────────────────────────── the try ends HERE
 > setState → invalidateTags → onSuccess       → the CONSEQUENCES of success
@@ -35,7 +35,7 @@ preserve the same three bands.
 
 ```mermaid
 flowchart LR
-    Cmp["Consumer Component"] -->|"user action"| EXE["executeMutationFn(vars?, opts?)"]
+    Cmp["Consumer Component"] -->|"user action"| EXE["executeMutationFn(variables, opts?)"]
     EXE --> PEND["PENDING<br/>setState(isMutating: true)<br/>requestId = ++latestRequestIdRef.current"]
     PEND --> TRY{"await fn(variables)<br/>the ONLY statement inside try"}
 
@@ -46,7 +46,7 @@ flowchart LR
     INV --> CLR["JOB 1 — delete every fetchKey<br/>mapped to the tag"]
     INV --> EMIT["JOB 2 — eventEmitter.emit(tag)"]
     EMIT --> RD["mounted readers subscribed<br/>to the tag → refresh"]
-    INV --> OK["onSuccess(data) → return response"]
+    INV --> OK["onSuccess(result ?? null) → return result"]
 ```
 
 The **cache clear** and the **emit** are complementary: the emit refreshes readers that are _mounted now_;
@@ -66,18 +66,18 @@ sequenceDiagram
     participant Cmp as Consumer Component
     participant H as useMutationFn
     participant Fn as mutation callback (consumer-supplied)
-    participant API as Server (via wireApi)
+    participant API as Server (via wireData / wireRaw)
     participant FC as fetchClient
     participant Cache as promiseCacheStore
     participant EM as eventEmitter
     participant RD as Mounted readers
 
-    Cmp->>H: executeMutationFn(variables?, { onSuccess, onError })
+    Cmp->>H: executeMutationFn(variables, { onSuccess, onError })
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,RD: PENDING — the flag goes on, and this run claims a serial number
         H->>H: fn = mutationFnRef.current — the latest mutationFn, read at call time
-        H->>H: hasVariables = fn.length is non-zero — decides whether arg 1 is variables or options
+        Note over H: `variables` is always argument 1 and the options always argument 2.<br/>Nothing is inspected at runtime to tell them apart.
         H->>H: requestId = ++latestRequestIdRef.current
         H->>H: setState(isMutating: true) — data from the previous run is left in place
     end
@@ -86,11 +86,11 @@ sequenceDiagram
     H->>Fn: await fn(variables)
     Fn->>API: request (POST / PUT / DELETE)
     API-->>Fn: 2xx
-    Fn-->>H: HttpResponse { data, message, status }
+    Fn-->>H: result — whatever `fn` resolved, handed over untouched
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,RD: SETTLED — OUTSIDE `try`. Everything here is a consequence of a write<br/>the server has already committed and no one can roll back.
-        H->>H: setState(data: response.data ?? null, isMutating: false)
+        H->>H: setState(data: result ?? null, isMutating: false)
         Note over H,FC: this setState — and ONLY this setState — is inside<br/>`if (requestId === latestRequestIdRef.current)`
 
         opt invalidatesTags provided
@@ -107,9 +107,9 @@ sequenceDiagram
             end
         end
 
-        H->>Cmp: await onSuccess(response.data ?? null)
+        H->>Cmp: await onSuccess(result ?? null)
         Note over H,Cmp: awaited, so the returned Promise settles only once the callback has finished.<br/>isMutating is already false — it tracks the request, not the callback.
-        H-->>Cmp: return the full HttpResponse — not the unwrapped data
+        H-->>Cmp: return result — the same value onSuccess received
     end
 ```
 
@@ -130,9 +130,9 @@ sequenceDiagram
     participant Cmp as Consumer Component
     participant H as useMutationFn
     participant Fn as mutation callback (consumer-supplied)
-    participant API as Server (via wireApi)
+    participant API as Server (via wireData / wireRaw)
 
-    Cmp->>H: executeMutationFn(variables?, { onSuccess, onError })
+    Cmp->>H: executeMutationFn(variables, { onSuccess, onError })
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,API: PENDING — identical to the success path, the branch is not decided yet
@@ -147,11 +147,11 @@ sequenceDiagram
     alt non-OK response — an exchange completed
         Fn->>API: request
         API-->>Fn: 4xx / 5xx
-        Fn-->>H: wireApi throws ApiError (statusCode from the response)
+        Fn-->>H: wireRaw throws ApiError (statusCode from the response)
     else no exchange at all
         Fn->>API: request never completes (DNS, TLS, refused, timeout, abort)
-        Fn-->>H: wireApi throws ApiError — errorCode 'NETWORK_ERROR', statusCode 520
-    else thrown from somewhere wireApi does not wrap
+        Fn-->>H: wireRaw throws ApiError — errorCode 'NETWORK_ERROR', statusCode 520
+    else thrown from somewhere wireRaw does not wrap
         Note over Fn,H: a rejected getToken(), an onRequest / onResponse / transformResponse<br/>interceptor, an uninitialized wire
         Fn-->>H: the raw thrown value
     end
@@ -200,9 +200,10 @@ flowchart TB
   in one write — simple, at the cost of refetching readers that may not have changed. A narrow, per-entity
   tag (`'entity-list-' + id`) refreshes exactly one. Choosing the granularity is the caller's modeling
   decision; fetchwire treats every tag identically.
-- **`onSuccess` receives the unwrapped `data`; the return value keeps the envelope.** The callback is
-  passed `response.data ?? null` — the same payload shape readers get — while `executeMutationFn` returns
-  the whole `HttpResponse`, so `message` and `status` stay reachable.
+- **`onSuccess` and the return value carry the same thing.** Both are whatever `mutationFn` resolved:
+  `onSuccess` is passed `result ?? null`, and `executeMutationFn` returns `result` itself. The hook never
+  inspects or unwraps it. To reach transport metadata such as `status`, have `mutationFn` call
+  [`wireRaw`](../../src/core/wire.ts) instead of `wireData`.
 - **Unmounting the caller does not abandon the write.** A mutation whose component unmounts before the
   request settles still invalidates its tags and still calls `onSuccess` / `onError`. Only `setState` is
   lost, and only because React drops it — the cache and the caller's callbacks are not the component's to

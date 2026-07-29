@@ -1,6 +1,7 @@
-import { HttpResponse, WireRequestInit } from "../interface";
+import { WireRequestInit } from "../interface";
 import { ApiError } from "../util/api-error";
-import { normalizeToApiError } from "../util/helper";
+import { normalizeToApiError } from "../util/normalize-to-api-error";
+import { mergeHeaders } from "../util/merge-headers";
 import { getWireConfig } from "./config";
 
 // `statusCode` is absent on purpose; fetchwire never takes the status from the body.
@@ -10,49 +11,56 @@ interface JsonErrorResponseBody {
 }
 
 /**
- * Sends an API request and returns the response.
+ * Sends an API request and returns the payload together with the `Response` that carried it.
+ *
  * @param endpoint - The API endpoint to call. Example: '/api/v1/users'.
  * @param options - The request options: a `RequestInit` plus optional fetchwire flags
  *   (e.g. `skipToken` to send the request without an `Authorization` header).
+ * @returns `data` — the payload, as produced by `transformResponse`, or the parsed body when
+ *   no transform is configured. `undefined` for a `204`, a `205` or any `HEAD`.
+ *
+ *   `response` — the `Response` `fetch` returned, with its body already consumed.
  *
  * @throws {ApiError} with `errorCode`:
  *   - `"NETWORK_ERROR"` — `fetch()` itself rejected; the request never completed.
- *   - `"EMPTY_BODY"` — the response completed with no body on a status other than 204 or 205.
+ *   - `"EMPTY_BODY"` — the response completed with no body on a status that should have had one.
  *   - `"INVALID_JSON"` — the body has content but is not JSON.
  *   - whatever `transformError` produces, for any non-OK response.
  *
  * Errors thrown by `onRequest`, `onResponse` or `transformResponse` are NOT wrapped.
  */
-export async function wireApi<T>(
+export async function wireRaw<T>(
   endpoint: string,
   options: WireRequestInit = {},
-): Promise<HttpResponse<T>> {
+): Promise<{ data: T; response: Response }> {
   // Split fetchwire-specific flags off so only standard RequestInit reaches fetch/onRequest.
   const { skipToken, ...requestInit } = options;
   const config = getWireConfig();
   const url = `${config.baseUrl}${endpoint}`;
   // `skipToken` requests never touch getToken — this is what lets the token-refresh call
-  // itself go through wireApi without recursing into the refresh it is performing.
+  // itself go through fetchwire without recursing into the refresh it is performing.
   const accessToken = skipToken ? null : await config.getToken();
 
-  const isFormData = requestInit.body instanceof FormData;
-  const headers = new Headers({
-    ...config.headers,
-    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    ...requestInit.headers,
-  });
-  if (!isFormData && !headers.has("Content-Type")) {
+  // Precedence reads left to right: global config < Authorization < per-request.
+  const headers = mergeHeaders(
+    config.headers,
+    accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    requestInit.headers,
+  );
+
+  // Content-Type describes the body being SENT
+  if (typeof requestInit.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
+  // Accept states which media types are acceptable in the RESPONSE (RFC 9110 §8.3 vs §12.5.1).
+  // `*/*;q=0.8` keeps it a preference rather than a demand:
+  // JSON ranks first, but still has something to fall back on instead of answering `406 Not Acceptable`.
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json, */*;q=0.8");
+  }
+
   // Build ONE request object and share its reference with both the interceptor and fetch.
-  // ---
-  // Why use a shared variable instead of spreading inline at each function:
-  // `onRequest` lets callers mutate the request before it is sent (e.g. add a header).
-  // Mutation only works if the interceptor and fetch point to the SAME object.
-  // Spreading `{ ...options, headers }` at each function (onRequest, fetch)
-  // would create a separate object per call, so the interceptor would mutate one object
-  // while fetch sends a different one — the change would be silently lost.
   const finalRequestConfig: RequestInit = {
     ...requestInit,
     headers,
@@ -121,15 +129,21 @@ export async function wireApi<T>(
     throw apiError;
   }
 
+  // 204 and 205 are defined to carry none (RFC 9110 §15.3.5, §15.3.6) and a HEAD response never does (§9.3.2).
+  if (
+    response.status === 204 ||
+    response.status === 205 ||
+    requestInit.method?.toUpperCase() === "HEAD"
+  ) {
+    // Nothing to parse, so transformResponse has nothing to run on either.
+    return { data: undefined as T, response };
+  }
+
   const textResponse = await response.text();
 
-  // Classify an empty body by STATUS, 204 and 205 are defined as bodiless (RFC 9110 §15.3.5, §15.3.6).
-  // For every other STATUS, an empty body is a broken response.
+  // Past the check above, every remaining status is defined to carry a body,
+  // so an empty one is a broken response rather than a legitimate outcome.
   if (!textResponse) {
-    // No JSON exists to hand to transformResponse, so this returns directly.
-    if (response.status === 204 || response.status === 205) {
-      return { data: undefined, status: response.status, message: "" };
-    }
     // content-length locates the loss:
     //   "0"                → the sender really sent nothing
     //   absent or non-zero → the body was lost after the headers arrived, i.e. in transport
@@ -152,16 +166,33 @@ export async function wireApi<T>(
     );
   }
 
-  // With transformResponse set, the consumer owns the shape entirely.
-  if (config.transformResponse) {
-    return config.transformResponse(jsonResponseBody) as HttpResponse<T>;
-  }
+  // transformResponse only ever picks the payload out of the body.
+  const data = config.transformResponse
+    ? (config.transformResponse(jsonResponseBody) as T)
+    : (jsonResponseBody as T);
 
-  // Without it, fetchwire knows nothing about this API's envelope, so it does not invent one.
-  // As default, the body IS the data, and the transport status is the only status that is real.
-  return {
-    data: jsonResponseBody as T,
-    status: response.status,
-    message: "",
-  };
+  return { data, response };
+}
+
+/**
+ * Sends an API request and returns the payload, dropping the `Response` that `wireRaw` keeps.
+ *
+ * @param endpoint - The API endpoint to call. Example: '/api/v1/users'.
+ * @param options - The request options: a `RequestInit` plus optional fetchwire flags
+ *   (e.g. `skipToken` to send the request without an `Authorization` header).
+ * @returns The payload, as produced by `transformResponse`, or the parsed body when no
+ *   transform is configured. `undefined` for a `204`, a `205` or any `HEAD`.
+ *
+ * @throws {ApiError} with `errorCode`:
+ *   - `"NETWORK_ERROR"` — `fetch()` itself rejected; the request never completed.
+ *   - `"EMPTY_BODY"` — the response completed with no body on a status that should have had one.
+ *   - `"INVALID_JSON"` — the body has content but is not JSON.
+ *   - whatever `transformError` produces, for any non-OK response.
+ */
+export async function wireData<T>(
+  endpoint: string,
+  options: WireRequestInit = {},
+): Promise<T> {
+  const { data } = await wireRaw<T>(endpoint, options);
+  return data;
 }

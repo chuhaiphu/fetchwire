@@ -1,10 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { normalizeToApiError } from "../util/helper";
-import {
-  HttpResponse,
-  MutationOptions,
-  ExecuteMutationOptions,
-} from "../interface";
+import { normalizeToApiError } from "../util/normalize-to-api-error";
+import { MutationOptions, ExecuteMutationOptions } from "../interface";
 import { fetchClient } from "../core/fetch-client";
 
 interface MutationState<T> {
@@ -15,8 +11,11 @@ interface MutationState<T> {
 /**
  * A hook that runs a mutation on demand and tracks its pending and result state.
  *
- * @param mutationFn - A Promise-returning function `() => Promise<HttpResponse<T>>`.
- *   fetchwire runs it only when you call `executeMutationFn()`.
+ * @template T - The type of the value `mutationFn` resolves.
+ * @template TVariables - The type of the input passed to `mutationFn`. Defaults to `void`.
+ * @param mutationFn - A Promise-returning function `(variables: TVariables) => Promise<T>`.
+ *   fetchwire runs it only when you call `executeMutationFn(variables)`.
+ *   Whatever it resolves **is** `data` — fetchwire never inspects or unwraps it.
  * @param options - Options for this hook.
  *   - `invalidatesTags` — an optional list of tag strings to invalidate after a successful mutation.
  *     Every `useFetch` / `useFetchFn` subscribed to a matching tag refreshes automatically.
@@ -24,68 +23,28 @@ interface MutationState<T> {
  * @returns
  *   - `data` — the resolved data of type `T`, or null.
  *   - `isMutating` — true while the mutation is in flight.
- *   - `executeMutationFn` — runs `mutationFn`.
- *      Accepts optional per-call `{ onSuccess, onError }` callbacks.
+ *   - `executeMutationFn` — runs `mutationFn(variables)`. `variables` comes first and may be
+ *      omitted when `TVariables` is `void`; optional per-call `{ onSuccess, onError }`
+ *      callbacks come second.
  *   - `reset` — resets state back to the initial idle state and retires every in-flight run.
  *
  * @example
+ * // With variables — TVariables infers as `string`:
+ * const { executeMutationFn } = useMutationFn((id: string) => deleteTodoApi(id), {
+ *   invalidatesTags: ['todos'],
+ * });
+ * executeMutationFn('todo-123', { onSuccess: () => alert('Deleted') });
+ *
+ * @example
+ * // Without variables — TVariables falls back to `void`:
  * const { executeMutationFn, isMutating } = useMutationFn(logoutApi, {
  *   invalidatesTags: ['user-session'],
  * });
- * // Trigger without variables:
- * executeMutationFn({ onSuccess: () => console.log('Logged out') });
+ * executeMutationFn();
+ * executeMutationFn(undefined, { onSuccess: () => console.log('Logged out') });
  */
-export function useMutationFn<T>(
-  mutationFn: (variables: void) => Promise<HttpResponse<T>>,
-  options?: MutationOptions,
-): {
-  data: T | null;
-  isMutating: boolean;
-  executeMutationFn: (
-    executeOptions?: ExecuteMutationOptions<T>,
-  ) => Promise<HttpResponse<T> | null>;
-  reset: () => void;
-};
-
-/**
- * A hook that runs a mutation on demand and tracks its pending and result state.
- *
- * @template TVariables - The type of the input variables passed to `mutationFn`.
- * @param mutationFn - A Promise-returning function `(variables: TVariables) => Promise<HttpResponse<T>>`.
- *    fetchwire runs it only when you call `executeMutationFn(variables)`.
- * @param options - Options for this hook.
- *   - `invalidatesTags` — an optional list of tag strings to invalidate after a
- *     successful mutation. Every `useFetch` / `useFetchFn` subscribed to a matching
- *     tag refreshes automatically. Tag strings must not contain commas.
- * @returns
- *   - `data` — the resolved data of type `T`, or null.
- *   - `isMutating` — true while the mutation is in flight.
- *   - `executeMutationFn` — runs `mutationFn(variables)`.
- *      Accepts optional per-call `{ onSuccess, onError }` callbacks.
- *   - `reset` — resets state back to the initial idle state and retires every in-flight run.
- *
- * @example
- * const { executeMutationFn } = useMutationFn((id: string) => deleteItem(id), {
- *   invalidatesTags: ['items'],
- * });
- * // Trigger with variables:
- * executeMutationFn('item-id-123', { onSuccess: () => alert('Deleted') });
- */
-export function useMutationFn<T, TVariables>(
-  mutationFn: (variables: TVariables) => Promise<HttpResponse<T>>,
-  options?: MutationOptions,
-): {
-  data: T | null;
-  isMutating: boolean;
-  executeMutationFn: (
-    variables: TVariables,
-    executeOptions?: ExecuteMutationOptions<T>,
-  ) => Promise<HttpResponse<T> | null>;
-  reset: () => void;
-};
-
 export function useMutationFn<T, TVariables = void>(
-  mutationFn: (variables: TVariables) => Promise<HttpResponse<T>>,
+  mutationFn: (variables: TVariables) => Promise<T>,
   options?: MutationOptions,
 ) {
   const [state, setState] = useState<MutationState<T>>({
@@ -135,38 +94,24 @@ export function useMutationFn<T, TVariables = void>(
 
   const executeMutationFn = useCallback(
     async (
-      firstArg?: TVariables | ExecuteMutationOptions<T>,
-      secondArg?: ExecuteMutationOptions<T>,
-    ): Promise<HttpResponse<T> | null> => {
+      variables: TVariables,
+      executeOptions?: ExecuteMutationOptions<T>,
+    ): Promise<T | null> => {
       const fn = mutationFnRef.current;
-
-      // Determine if the first argument is variables or execute options based on the parameters count of mutationFn
-      // Function.length returns the number of parameters defined in the function signature
-      const hasVariables = fn.length > 0;
-
-      // If mutationFn expects variables, the first argument is variables and the second is execute options.
-      // If mutationFn does not expect variables, the first argument is execute options and there is no second argument.
-      // Example:
-      // executeMutationFn(variables, { onSuccess }) -> hasVariables = true
-      // executeMutationFn({ onSuccess }) -> hasVariables = false
-      const variables = (hasVariables ? firstArg : undefined) as TVariables;
-      const executeOptions = (
-        hasVariables ? secondArg : firstArg
-      ) as ExecuteMutationOptions<T>;
 
       // Claim a serial number for this run.
       const requestId = ++latestRequestIdRef.current;
 
       setState((prev) => ({ ...prev, isMutating: true }));
 
-      let response: HttpResponse<T>;
+      let result: T;
 
       // Only the network call belongs inside `try`.
       // Everything that happens after a success is the CONSEQUENCE of the mutation, not part of it.
       // Why?: If they ran inside the same `try`, `onError` would fire alongside `onSuccess`,
       // and the caller would be told a mutation the server already committed had failed.
       try {
-        response = await fn(variables);
+        result = await fn(variables);
       } catch (error) {
         const apiError = normalizeToApiError(error);
         if (requestId === latestRequestIdRef.current) {
@@ -181,7 +126,7 @@ export function useMutationFn<T, TVariables = void>(
 
       if (requestId === latestRequestIdRef.current) {
         setState({
-          data: response.data ?? null,
+          data: result ?? null,
           isMutating: false,
         });
       }
@@ -191,9 +136,9 @@ export function useMutationFn<T, TVariables = void>(
         fetchClient.invalidateTags(tagsToInvalidate);
       }
 
-      await executeOptions?.onSuccess?.(response.data ?? null);
+      await executeOptions?.onSuccess?.(result ?? null);
 
-      return response;
+      return result;
     },
     [invalidatesTagsKey],
   );

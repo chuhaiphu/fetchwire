@@ -22,9 +22,7 @@ flowchart LR
     NEW --> USE
     USE -->|"pending"| SUS["nearest &lt;Suspense&gt; fallback"]
     USE -->|"rejected"| EB["nearest &lt;ErrorBoundary&gt; fallback"]
-    USE -->|"fulfilled"| GUARD{"data === undefined?"}
-    GUARD -->|"yes"| EB
-    GUARD -->|"no"| DATA["return { data, refreshFetch, isRefreshing }"]
+    USE -->|"fulfilled"| DATA["return { data, refreshFetch, isRefreshing }"]
 ```
 
 The consumer tree **must** provide both boundaries — `<Suspense>` for the pending state and
@@ -81,12 +79,10 @@ sequenceDiagram
         H->>React: useState initializer re-reads the SAME promise
         H->>React: const data = use(promise)
 
-        alt fulfilled & data !== undefined
-            React-->>H: use(promise) returns the value
+        alt fulfilled
+            React-->>H: use(promise) returns the value, whatever it is — the hook does not judge it
             H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
             Note over React: render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
-        else fulfilled & data === undefined (guard)
-            H-->>Cmp: hook throws ApiError - 'EMPTY_DATA' → nearest Error Boundary fallback shown
         else rejected (ApiError)
             React-->>Cmp: use(promise) throws the ApiError → nearest Error Boundary fallback shown
         end
@@ -106,7 +102,7 @@ sequenceDiagram
     participant Cmp as Consumer Component
     participant H as useFetch
     participant Fn as fetch callback (consumer-supplied)
-    participant API as Server (via wireApi)
+    participant API as Server (via wireData / wireRaw)
     participant FC as fetchClient
     participant Cache as promiseCacheStore
     participant React as React runtime
@@ -119,11 +115,11 @@ sequenceDiagram
         H->>Cache: has(fetchKey)
         Cache-->>H: false → cache MISS, no one warmed this key
 
-        Note over H,API: `fetch` is the consumer's callback, invoked exactly ONCE.<br/>.then/.catch only derive new promises — they issue no extra request.
+        Note over H,API: `fetch` is the consumer's callback, invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
         H->>Fn: fetch()
         Fn->>API: HTTP request
         Fn-->>H: promise A (pending)
-        H->>H: rawPromise = A.then(extractHttpResponseData).catch(rethrow)
+        H->>H: rawPromise = A — cached exactly as `fetch` returned it, no derived promise
 
         H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, tags)
         FC->>FC: void rawPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.<br/>The promise stays rejected — use() still throws to the Error Boundary.
@@ -139,7 +135,7 @@ sequenceDiagram
     end
 
     API-->>Fn: response
-    Note over Fn,React: A settles → extractHttpResponseData runs → rawPromise settles.<br/>React retries the suspended subtree from scratch.
+    Note over Fn,React: A settles.<br/>React retries the suspended subtree from scratch.
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,React: RENDER 2 — React retries rendering from scratch
@@ -150,12 +146,10 @@ sequenceDiagram
         H->>React: useState initializer re-reads the SAME rawPromise
         H->>React: const data = use(promise)
 
-        alt fulfilled & data !== undefined
-            React-->>H: use(promise) returns the value
+        alt fulfilled
+            React-->>H: use(promise) returns the value, whatever it is — the hook does not judge it
             H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
             Note over React: render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
-        else fulfilled & data === undefined (guard)
-            H-->>Cmp: hook throws ApiError - 'EMPTY_DATA' → nearest Error Boundary fallback shown
         else rejected (ApiError)
             React-->>Cmp: use(promise) throws the ApiError → nearest Error Boundary fallback shown<br/>(component unmounts — rawPromise stays cached as rejected)
         end
@@ -181,7 +175,7 @@ sequenceDiagram
     participant EM as eventEmitter
     participant H as useFetch
     participant Fn as fetch callback (consumer-supplied)
-    participant API as Server (via wireApi)
+    participant API as Server (via wireData / wireRaw)
     participant React as React runtime
 
     Note over Cmp,React: PRECONDITION — this useFetch is mounted and a render of it already committed,<br/>so its useEffect ran → eventEmitter.addListener(tag, refreshFetch) per tag.<br/>A reader that never committed holds no subscription and cannot be tag-refreshed.
@@ -210,11 +204,11 @@ sequenceDiagram
     rect rgba(128,128,128,0.12)
         Note over H,React: REFRESH — the refreshFetch body, identical for both triggers
 
-        Note over H,API: `fetch` is the consumer's callback, invoked exactly ONCE.<br/>.then only derives a new promise — it issues no extra request.
+        Note over H,API: `fetch` is the consumer's callback, invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
         H->>Fn: fetch()
         Fn->>API: HTTP request
         Fn-->>H: promise A (pending)
-        H->>H: newPromise = A.then(extractHttpResponseData)
+        H->>H: newPromise = A — cached exactly as `fetch` returned it, no derived promise
 
         H->>FC: cachePromiseAndRegisterTags(fetchKey, newPromise, tags)
         FC->>FC: void newPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.<br/>The promise stays rejected — use() still throws to the Error Boundary.
@@ -240,11 +234,9 @@ sequenceDiagram
 
             Note over React: newPromise settles → React commits the pending render → isRefreshing = false
 
-            alt fulfilled & data !== undefined
+            alt fulfilled
                 React-->>H: use(newPromise) returns the fresh value
                 H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
-            else fulfilled & data === undefined (guard)
-                H-->>Cmp: hook throws ApiError - 'EMPTY_DATA' → nearest Error Boundary fallback shown
             else rejected (ApiError)
                 React-->>Cmp: use(newPromise) throws the ApiError → nearest Error Boundary fallback shown
             end

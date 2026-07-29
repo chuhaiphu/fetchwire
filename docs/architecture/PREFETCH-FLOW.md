@@ -40,7 +40,7 @@ sequenceDiagram
     participant Cmp as Consumer Component
     participant PF as prefetch()
     participant Fn as fetch callback (consumer-supplied)
-    participant API as Server (via wireApi)
+    participant API as Server (via wireData / wireRaw)
     participant FC as fetchClient
     participant Cache as promiseCacheStore
 
@@ -58,11 +58,11 @@ sequenceDiagram
     else cache MISS — cold key
         Cache-->>PF: false
 
-        Note over PF,API: `fetchFn` is the consumer's callback, invoked exactly ONCE.<br/>.then only derives a new promise — it issues no extra request.
+        Note over PF,API: `fetchFn` is the consumer's callback, invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
         PF->>Fn: fetchFn()
         Fn->>API: HTTP request
         Fn-->>PF: promise A (pending)
-        PF->>PF: promise = A.then(extractHttpResponseData)
+        PF->>PF: promise = A — cached exactly as `fetchFn` returned it, no derived promise
 
         PF->>FC: cachePromiseAndRegisterTags(fetchKey, promise, tags)
         FC->>FC: void promise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.<br/>The promise stays rejected — use() still throws to the Error Boundary.

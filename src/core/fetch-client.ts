@@ -69,9 +69,8 @@ class FetchClient {
   }
 
   /**
-   * Invalidate the tags: clears every Promise in the Promise cache whose fetch key
-   * is associated with those tags. It also emits events to trigger a refresh on
-   * mounted components.
+   * Clears every Promise in the Promise cache whose fetch key is associated with those tags.
+   * It also emits events to trigger a refresh on mounted components.
    * @param tags - An array of tags to be invalidated.
    */
   invalidateTags(tags: string[]) {
