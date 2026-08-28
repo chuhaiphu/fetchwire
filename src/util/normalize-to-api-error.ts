@@ -16,12 +16,10 @@ export function normalizeToApiError(
   fallbackErrorCode = "UNKNOWN_ERROR",
   fallbackStatusCode?: number,
 ): ApiError {
-  // Return it untouched so a genuine errorCode/statusCode — set by wireRaw or by the
-  // consumer's own transformError — is never overwritten by the fallbacks.
+
   if (error instanceof ApiError) return error;
 
-  // Recover a message without assuming a shape: `throw new Error(...)` and `throw 'string'`
-  // are both ordinary JavaScript, and neither one is an ApiError.
+  // Recover a message without assuming a shape
   const message =
     error instanceof Error
       ? error.message

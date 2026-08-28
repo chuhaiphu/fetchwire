@@ -245,6 +245,20 @@ export async function deleteTodoApi(id: string) {
 - `fetchKey` caches this request's Promise, which is what prevents an infinite suspend loop across renders.
 - `refreshFetch` uses `useTransition` internally, so the current data stays visible while the refresh loads instead of falling back to the `<Suspense>` fallback.
 - `isRefreshing` is true while a refresh is in flight — use it for inline indicators without losing existing content.
+- Changing `fetchKey` (e.g. `` `todos-${filter}` ``) starts a fresh fetch and **suspends** the component again, so the `<Suspense>` fallback replaces the current data. To keep the old data on screen while the new key loads, change the value the key is built from inside `startTransition`:
+
+```tsx
+import { startTransition, useState } from "react";
+
+const [filter, setFilter] = useState("all");
+const { data: todos } = useFetch(() => getTodosApi(filter), {
+  fetchKey: `todos-${filter}`,
+  tags: ["todos"],
+});
+
+// without startTransition → the Suspense fallback flashes on every filter change
+<button onClick={() => startTransition(() => setFilter("done"))}>Done</button>;
+```
 
 ```tsx
 // src/components/TodoList.tsx
@@ -807,7 +821,7 @@ function useFetch<T>(
 Fetches immediately on mount and suspends the component while data is loading. The parent tree must have a `<Suspense>` boundary (for the loading state) and an `<ErrorBoundary>` (for API errors).
 
 - **`fetch`**: A Promise-returning function `() => Promise<T>`. fetchwire calls it automatically on mount to start the fetch, and again on every `refreshFetch()` or tag invalidation. Whatever it resolves **is** `data` — fetchwire never inspects or unwraps it.
-- **`options.fetchKey`**: A unique key that caches this request's Promise. If `prefetch()` ran with the same key beforehand, the hook reuses the cached Promise instead of firing a new request. The key must be unique across all concurrent fetches. A good convention is to include the resource name and any dynamic segments, e.g. `"todos"` or `"user-" + userId`.
+- **`options.fetchKey`**: A unique key that caches this request's Promise. If `prefetch()` ran with the same key beforehand, the hook reuses the cached Promise instead of firing a new request. The key must be unique across all concurrent fetches. A good convention is to include the resource name and any dynamic segments, e.g. `"todos"` or `"user-" + userId`. Changing it between renders starts a fresh fetch and **suspends** the component, so the `<Suspense>` fallback replaces the current data — update the value the key is built from inside `startTransition` to keep the old data visible instead.
 - **`options.tags`**: An optional list of tag strings this request subscribes to. When a `useMutationFn` invalidates a matching tag via `invalidatesTags`, the hook refreshes automatically.
 - **`data`**: The resolved value of type `T`. Never `null` — the hook suspends until the Promise settles, so there is no "not yet" state to represent.
 - **`refreshFetch()`**: Manually triggers a refresh while the component is mounted. Uses `useTransition` internally so the current data stays visible while the refresh loads. **Cannot be used to retry from an ErrorBoundary** — see [Retrying after an API error](#retrying-after-an-api-error).

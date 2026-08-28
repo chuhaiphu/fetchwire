@@ -3,6 +3,34 @@
 > Upgrade instructions live in [MIGRATION.md](./MIGRATION.md). This file records **what** changed and
 > **why**.
 
+## [6.0.1] - 2026-08-28
+
+No breaking changes — every call signature is unchanged.
+
+### Fixed
+
+- **`useFetch` kept reading the old key's data after `fetchKey` changed.**
+
+  The promise is pinned by a lazy `useState` initializer, which runs on mount only. A later render with a
+  new `fetchKey` fetched and cached the new promise, but `use()` still read the one stored on mount — so
+  the hook showed the previous key's data. The hook now re-points its promise state at the new key during
+  render.
+
+  Because that happens during render it cannot be a Transition: changing `fetchKey` suspends the
+  component and reveals the `<Suspense>` fallback. Change the value the key is built from inside
+  `startTransition` to keep the current data on screen.
+
+### Changed
+
+- **`refreshFetch` keeps a stable identity across renders.** `fetch` is read through a ref instead of
+  sitting in the `useCallback` deps, so an inline arrow — the documented usage — no longer gives
+  `refreshFetch` a new identity every render, which was re-registering every tag listener on every
+  render. This matches `useFetchFn` and `useMutationFn`.
+
+### Documentation
+
+- Documented the `fetchKey`-change path in the README and in `USE-FETCH-FLOW`.
+
 ## [6.0.0] - 2026-07-29
 
 fetchwire no longer invents a response shape. A request resolves the payload; the transport metadata

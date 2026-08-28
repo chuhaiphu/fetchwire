@@ -1,4 +1,11 @@
-import { useEffect, useCallback, use, useState, useTransition } from "react";
+import {
+  useEffect,
+  useCallback,
+  use,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { FetchOptions } from "../interface";
 import { eventEmitter } from "../core/event-emitter";
 import { promiseCacheStore } from "../core/promise-cache-store";
@@ -25,6 +32,8 @@ import { fetchClient } from "../core/fetch-client";
  * @param options - Options for this hook.
  *   - `fetchKey` — a unique key that caches this request's Promise.
  *     If `prefetch()` ran with the same key beforehand, the hook will reuses the cached Promise instead.
+ *     Changing `fetchKey` starts a fresh fetch and **suspends** the component.
+ *     Change `fetchKey` inside `startTransition` to keep the old data on screen while the new key loads.
  *   - `tags` — an optional list of tag strings this request subscribes to.
  *     When a `useMutationFn` invalidates a matching tag via `invalidatesTags`,
  *     the hook refreshes automatically.
@@ -95,16 +104,71 @@ export function useFetch<T>(
     () => promiseCacheStore.get(fetchKey) as Promise<T>,
   );
 
+  // What if we relied on the useState initializer above alone?
+  // 1. The initializer is lazy: it runs on MOUNT ONLY.
+  // 2. But fetchKey is built from props/state, so it can change on a later render,
+  //    e.g. a new fetchKey is provided: `todos-${filter}`.
+  // 3. The block above already ran for the NEW key: it fetched and cached that promise,
+  //    so promiseCacheStore.get(fetchKey) is guaranteed to hold an entry here.
+  // 4. The `promise` state, however, would still hold the promise of the OLD key.
+  // 5. use(promise) keeps returning the OLD key's data — a key change would never show new data.
+  // ---
+  // Adjusting state during render is React's documented pattern for this,
+  // and it is why no useEffect is needed: https://react.dev/learn/you-might-not-need-an-effect
+  // 
+  const [previousFetchKey, setPreviousFetchKey] = useState(fetchKey);
+  if (fetchKey !== previousFetchKey) {
+    setPreviousFetchKey(fetchKey);
+    setPromise(promiseCacheStore.get(fetchKey) as Promise<T>);
+  }
+
   const [isPending, startTransition] = useTransition();
 
+  const fetchRef = useRef(fetch);
+
+  // Why do we need fetchRef + this useEffect?
+  //
+  // Problem 1 — Stale closure if we only did useRef(fetch) once at init:
+  //   useRef(fetch) only captures the fetch value from the FIRST RENDER.
+  //   If fetch depends on state/props (e.g. fetch = () => getTodosApi(filter)),
+  //   then when `filter` changes, fetchRef.current would still point to the OLD closure with the OLD `filter`.
+  //   => refreshFetch() would always refresh with stale parameters, even though the component re-rendered
+  //      with a new filter.
+  //   That's why this useEffect is required — to keep fetchRef.current in sync
+  //
+  // Problem 2 — What if we drop the ref and put fetch directly in the useCallback deps of `refreshFetch`?
+  //   It would still call the correct fetch (via closure).
+  //   BUT: if the caller passes an inline function that isn't memoized, e.g.:
+  //     useFetch(() => getTodosApi(filter), { fetchKey: `todos-${filter}` })
+  //   then `() => getTodosApi(filter)` is a brand new function object on every render.
+  //   1. fetch's reference changes every render
+  //   2. then refreshFetch (useCallback) changes reference too, since fetch is in its deps
+  //   3. then the tag-subscription useEffect below re-runs, since refreshFetch is in its deps
+  //   => every tag listener is removed and registered again on EVERY render.
+  //      Nothing breaks, but the work is wasted.
+  //
+  //   In other words: removing the ref shifts the burden of memoizing fetch onto every consumer of this hook.
+  //
+  // => Solution: split these into two separate concerns
+  //   (1) Keep refreshFetch's reference stable: do NOT put fetch in the useCallback deps
+  //    — only keep fetchKey/tagsKey (the values that actually need to change refreshFetch's behavior).
+  //   (2) Still guarantee refreshFetch() always calls the latest fetch:
+  //       read fetch through a ref (fetchRef.current) and sync that ref on every render via the useEffect below.
+  //
+  // The cache-miss branch at the top of this hook keeps calling `fetch` directly: it runs during render,
+  // where `fetch` is already the latest value.
+  useEffect(() => {
+    fetchRef.current = fetch;
+  }, [fetch]);
+
   const refreshFetch = useCallback(() => {
-    const newPromise = fetch();
+    const newPromise = fetchRef.current();
     const tags = tagsKey.split(",");
     fetchClient.cachePromiseAndRegisterTags(fetchKey, newPromise, tags);
     startTransition(() => {
       setPromise(newPromise);
     });
-  }, [fetch, fetchKey, tagsKey]);
+  }, [fetchKey, tagsKey]);
 
   useEffect(() => {
     if (!tagsKey) return;

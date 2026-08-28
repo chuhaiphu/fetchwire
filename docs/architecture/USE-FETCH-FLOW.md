@@ -30,6 +30,24 @@ The consumer tree **must** provide both boundaries — `<Suspense>` for the pend
 
 ---
 
+## Reading the render bands
+
+Every shaded band below is **one render** — *"Rendering is React calling your components."* Four
+different things make React call this component, and each band says which one:
+
+| Band | What triggered this render |
+| --- | --- |
+| `MOUNT` | the component mounted — React's initial render |
+| `RETRY` | the promise it suspended on settled, so React **retries rendering from scratch**, keeping **no** state from the suspended render |
+| `UPDATE` | a state update on a mounted component — `setPromise`, or a new `fetchKey` arriving from above |
+| `IMMEDIATE RE-RUN` | `setPromise` was called **during** the previous render, so React calls the component again before rendering children or touching the DOM |
+
+A render ends one of two ways: it **commits** (React updates the DOM, then runs Effects), or it
+**suspends** and is discarded (no DOM, no Effects). That is why a suspended render never subscribes to
+tags.
+
+---
+
 ## First render — Cache hit
 
 The trigger is **render on mount**, not a user gesture. This is the branch taken when a
@@ -46,7 +64,7 @@ sequenceDiagram
     participant React as React runtime
 
     rect rgba(128,128,128,0.12)
-        Note over Cmp,React: RENDER 1 — This render suspends, so the Suspense fallback commits instead
+        Note over Cmp,React: MOUNT — React calls the component for the first time. This render suspends
         Note over Cmp: component mounts
         Cmp->>H: useFetch(fetch, { fetchKey, tags })
         H->>H: tagsKey = tags.join(',')
@@ -60,29 +78,29 @@ sequenceDiagram
         Note over FC,Cache: registerTags only. This path never calls cachePromiseAndRegisterTags
         H->>Cache: get(fetchKey)  (inside useState initial value)
         Cache-->>H: the warmed promise — pending, fulfilled, OR already rejected
-        H->>React: useEffect(subscribe tags) — REGISTERED, not run yet
+        H->>React: useEffect(subscribe tags) — queued, NOT run: Effects run only after a commit
         H->>React: const data = use(promise)
 
-        Note over React: use() will suspends here EVEN IF the response already came back
+        Note over React: use() suspends here EVEN IF the promise already resolved.<br/>React skips suspending only for a promise carrying a `status` field.<br/>fetchwire never sets one, so even an already-resolved promise costs this extra render.
         React-->>Cmp: component suspends → nearest Suspense fallback shown
-        Note over React: this render is discarded — its state is dropped and its Effects never run
+        Note over React: this render is discarded — React keeps NO state from a render that<br/>suspended before mounting, and its Effects never run
     end
 
     Note over Cache,React: the warmed promise settles<br/>React retries the suspended tree
 
     rect rgba(128,128,128,0.12)
-        Note over Cmp,React: RENDER 2 — React retries rendering from scratch
+        Note over Cmp,React: RETRY — React calls the component again, from scratch
         Cmp->>H: useFetch(fetch, { fetchKey, tags })
         H->>Cache: has(fetchKey)
-        Cache-->>H: true → same promise as RENDER 1, still no request
+        Cache-->>H: true → the same promise MOUNT read, still no request
         H->>FC: registerTags(fetchKey, tags)
-        H->>React: useState initializer re-reads the SAME promise
+        H->>React: the useState initializer runs AGAIN — MOUNT's state was dropped — and reads the SAME promise
         H->>React: const data = use(promise)
 
         alt fulfilled
             React-->>H: use(promise) returns the value, whatever it is — the hook does not judge it
             H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
-            Note over React: render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
+            Note over React: this render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
         else rejected (ApiError)
             React-->>Cmp: use(promise) throws the ApiError → nearest Error Boundary fallback shown
         end
@@ -108,7 +126,7 @@ sequenceDiagram
     participant React as React runtime
 
     rect rgba(128,128,128,0.12)
-        Note over Cmp,React: RENDER 1 — This render suspends, so the Suspense fallback commits instead
+        Note over Cmp,React: MOUNT — React calls the component for the first time. This render suspends
         Note over Cmp: component mounts
         Cmp->>H: useFetch(fetch, { fetchKey, tags })
         H->>H: tagsKey = tags.join(',')
@@ -127,29 +145,29 @@ sequenceDiagram
         FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
 
         H->>React: useState(() => Cache.get(fetchKey)) — pins that exact instance
-        H->>React: useEffect(subscribe tags) — REGISTERED, not run yet
+        H->>React: useEffect(subscribe tags) — queued, NOT run: Effects run only after a commit
         H->>React: const data = use(promise)
 
-        Note over React: PENDING — React aborts this pass and discards its state.<br/>Effects never run, so no tag subscription exists yet.
+        Note over React: PENDING — this render is discarded: React keeps NO state from a render that<br/>suspended before mounting, and its Effects never run, so no tag subscription exists yet
         React-->>Cmp: component suspends → nearest Suspense fallback shown
     end
 
     API-->>Fn: response
-    Note over Fn,React: A settles.<br/>React retries the suspended subtree from scratch.
+    Note over Fn,React: A settles.<br/>React retries the suspended tree.
 
     rect rgba(128,128,128,0.12)
-        Note over Cmp,React: RENDER 2 — React retries rendering from scratch
+        Note over Cmp,React: RETRY — React calls the component again, from scratch
         Cmp->>H: useFetch(fetch, { fetchKey, tags })
         H->>Cache: has(fetchKey)
-        Cache-->>H: true → the entry RENDER 1 wrote is still there, so fetch() is NOT called again
+        Cache-->>H: true → the entry MOUNT wrote is still there, so fetch() is NOT called again
         H->>FC: registerTags(fetchKey, tags)
-        H->>React: useState initializer re-reads the SAME rawPromise
+        H->>React: the useState initializer runs AGAIN — MOUNT's state was dropped — and reads the SAME rawPromise
         H->>React: const data = use(promise)
 
         alt fulfilled
             React-->>H: use(promise) returns the value, whatever it is — the hook does not judge it
             H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
-            Note over React: render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
+            Note over React: this render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
         else rejected (ApiError)
             React-->>Cmp: use(promise) throws the ApiError → nearest Error Boundary fallback shown<br/>(component unmounts — rawPromise stays cached as rejected)
         end
@@ -178,7 +196,7 @@ sequenceDiagram
     participant API as Server (via wireData / wireRaw)
     participant React as React runtime
 
-    Note over Cmp,React: PRECONDITION — this useFetch is mounted and a render of it already committed,<br/>so its useEffect ran → eventEmitter.addListener(tag, refreshFetch) per tag.<br/>A reader that never committed holds no subscription and cannot be tag-refreshed.
+    Note over Cmp,React: PRECONDITION — this useFetch is mounted and one of its renders already committed,<br/>so its useEffect ran → eventEmitter.addListener(tag, refreshFetch) per tag.<br/>A reader that never committed holds no subscription and cannot be tag-refreshed.
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,EM: TRIGGER A — tag-driven, and it does TWO independent jobs
@@ -202,7 +220,8 @@ sequenceDiagram
     end
 
     rect rgba(128,128,128,0.12)
-        Note over H,React: REFRESH — the refreshFetch body, identical for both triggers
+        Note over H,React: refreshFetch body — identical for both triggers, and it runs OUTSIDE render
+        H->>H: fetch = fetchRef.current — the latest fetch, read at call time
 
         Note over H,API: `fetch` is the consumer's callback, invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
         H->>Fn: fetch()
@@ -221,18 +240,18 @@ sequenceDiagram
 
     alt reader still mounted
         rect rgba(128,128,128,0.12)
-            Note over Cmp,React: RE-RENDER — the hook body runs again and fires NO new request
-            React->>H: re-render (marked as a Transition)
+            Note over Cmp,React: UPDATE — setPromise makes React call the component again, and it fires NO new request
+            React->>H: React calls the component again — this update is a Transition
             H->>Cache: has(fetchKey)
             Cache-->>H: true → the entry refreshFetch just wrote, so fetch() is NOT called again
             H->>FC: registerTags(fetchKey, tags)
-            Note over H,React: useState initializer does NOT re-run — it is lazy and ran only on mount.<br/>`promise` comes from setPromise, so it is newPromise.
+            Note over H,React: the useState initializer does NOT run — it is lazy and ran only on mount.<br/>`promise` comes from setPromise, so it is newPromise.
             H->>React: const data = use(newPromise)
 
             Note over React: PENDING — inside a Transition, so React does not replace<br/>already revealed content with the Suspense fallback.
             React-->>Cmp: the current data stays on screen (isRefreshing = true)
 
-            Note over React: newPromise settles → React commits the pending render → isRefreshing = false
+            Note over React: newPromise settles → React commits this render → isRefreshing = false
 
             alt fulfilled
                 React-->>H: use(newPromise) returns the fresh value
@@ -241,8 +260,8 @@ sequenceDiagram
                 React-->>Cmp: use(newPromise) throws the ApiError → nearest Error Boundary fallback shown
             end
         end
-    else reader unmounted before the re-render runs
-        Note over H,Cache: The re-render never runs, so use() never reads newPromise.<br/>The no-op rejection listener keeps a rejected newPromise from firing unhandledrejection.<br/>It stays cached AS REJECTED, so the next mount takes the cache-hit path on it —<br/>clear it with fetchClient.remove(fetchKey).
+    else reader unmounted before that render runs
+        Note over H,Cache: The render never happens, so use() never reads newPromise.<br/>The no-op rejection listener keeps a rejected newPromise from firing unhandledrejection.<br/>It stays cached AS REJECTED, so the next mount takes the cache-hit path on it —<br/>clear it with fetchClient.remove(fetchKey).
     end
 ```
 
@@ -254,6 +273,82 @@ sequenceDiagram
 > **Why `tagsKey = tags.join(',')`.** `options.tags` is a new array on every render, which would make the
 > subscription `useEffect` re-run each render. Joining to a stable string key makes the effect depend on
 > the tag _values_, not the array identity. (Constraint: tag strings must not contain commas.)
+
+---
+
+## `fetchKey` changes — a new read, not a refresh
+
+`fetchKey` is the identity of the read, so changing it asks for a **different** resource, not a fresh copy
+of the same one. The trigger is a **new key arriving on a mounted reader** — not `refreshFetch()`, not a
+tag event — and the hook moves its promise state onto that key **during** the render.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Cmp as Consumer Component
+    participant H as useFetch
+    participant Fn as fetch callback (consumer-supplied)
+    participant API as Server (via wireData / wireRaw)
+    participant FC as fetchClient
+    participant Cache as promiseCacheStore
+    participant React as React runtime
+
+    Note over Cmp,React: PRECONDITION — this useFetch is mounted on previousFetchKey,<br/>so promise A is its state and A's data is on screen.
+
+    rect rgba(128,128,128,0.12)
+        Note over Cmp,React: UPDATE — a new fetchKey arrives, and this render sets state
+        Cmp->>H: useFetch(fetch, { fetchKey, tags })
+        H->>Cache: has(fetchKey)
+        Cache-->>H: false → cache MISS, no one warmed the new key
+
+        Note over H,API: `fetch` is the consumer's callback, invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
+        H->>Fn: fetch()
+        Fn->>API: HTTP request
+        Fn-->>H: promise B (pending)
+        H->>H: rawPromise = B — cached exactly as `fetch` returned it, no derived promise
+
+        H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, tags)
+        FC->>FC: void rawPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.
+        FC->>Cache: set(fetchKey, rawPromise) — the previousFetchKey entry is left untouched
+        FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
+
+        Note over H,React: the useState initializer does NOT run — it is lazy and ran only on mount,<br/>so `promise` still holds promise A.
+        H->>H: fetchKey !== previousFetchKey
+        H->>React: setPreviousFetchKey(fetchKey) + setPromise(Cache.get(fetchKey))
+        H->>React: const data = use(promise A) — `promise` is this render's snapshot, so setPromise did NOT change it<br/>A is already fulfilled, so use() returns its data instead of suspending
+
+        Note over React: React calls the component again IMMEDIATELY after this render returns.<br/>The children do not render with it and the DOM is not updated,<br/>so this render is discarded — A's data is never painted under the new key.
+    end
+
+    rect rgba(128,128,128,0.12)
+        Note over Cmp,React: IMMEDIATE RE-RUN — the same component again, before anything commits
+        Cmp->>H: useFetch(fetch, { fetchKey, tags })
+        H->>Cache: has(fetchKey)
+        Cache-->>H: true → the entry the previous render wrote, so fetch() is NOT called again
+        H->>FC: registerTags(fetchKey, tags)
+        Note over H,React: `promise` comes from setPromise, so it is promise B.
+        H->>React: const data = use(promise B)
+
+        Note over React: PENDING — this update is NOT a Transition, so React DOES<br/>replace the already revealed content with the Suspense fallback.
+        React-->>Cmp: component suspends → nearest Suspense fallback shown
+    end
+
+    Note over Cache,React: promise B settles<br/>React retries the suspended tree — fulfilled → data, rejected (ApiError) → Error Boundary
+```
+
+> **Why the promise is re-pointed during render, not in an Effect.** An Effect runs only after a render
+> commits, so the browser would paint one frame of the previous key's data under the new key before the
+> correction landed. Setting state during render keeps that frame from existing: React calls the
+> component again before its children render and before the DOM is touched. The
+> `fetchKey !== previousFetchKey` comparison is what keeps it from looping. (React's documented pattern
+> for adjusting state when a prop changes —
+> [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect).)
+
+> **Why a key change suspends but a refresh does not.** `refreshFetch` swaps the promise inside
+> `startTransition`, which is what keeps the current data on screen. This swap runs during render, with no
+> `startTransition` around it, so the update stays urgent and the Suspense fallback replaces the current
+> data. Keeping it on screen is the caller's job — change whatever the key is built from inside their own
+> `startTransition`.
 
 ---
 
