@@ -5,7 +5,9 @@ configure one.
 
 | | min | min + gzip |
 | --- | --- | --- |
-| **fetchwire** | **5.68 KB** | **2.24 KB** |
+| **fetchwire** | **5.55 KB** | **2.14 KB** |
+| — `fetchwire` alone (no React) | 2.09 KB | 0.98 KB |
+| — `fetchwire/react` alone | 3.46 KB | 1.28 KB |
 | SWR (`useSWR` + `useSWRMutation`) | 13.87 KB | 6.26 KB |
 | TanStack Query | 45.98 KB | 13.58 KB |
 | axios | 60.94 KB | 21.05 KB |
@@ -17,8 +19,9 @@ configure one.
 - Deliver a smooth, non-blocking data-fetching experience.
 - Eliminate loading waterfalls and make the UI feel instant.
 
-> **Upgrading from 5.x?** fetchwire 6 removes the `HttpResponse` envelope — see the
-> [migration guide](./MIGRATION.md). Three of the changes are silent, so start there.
+> **Upgrading from 6.x?** fetchwire 7 splits the package into two entry points and hands you the
+> server's error body verbatim — see the [migration guide](./MIGRATION.md). Two of the changes are
+> silent, so start there.
 
 ### What fetchwire has
 
@@ -26,7 +29,7 @@ configure one.
 | --- | --- |
 | **Global configuration** | One place for `baseUrl`, the auth token, default headers, and request / response / error interceptors — `initWire`. |
 | **Typed HTTP client** | `wireData` resolves to the payload `T`. Need `status` or `headers`? `wireRaw` hands back the payload plus the native `Response`. |
-| **Normalized errors** | Every failure arrives as an `ApiError` with `message`, `errorCode`, and `statusCode`, shaped by your `transformError`. |
+| **Errors that keep the evidence** | Every transport failure arrives as an `ApiError` carrying the `Response` and the server's error body verbatim on `.data`. fetchwire shapes nothing. |
 | **Suspense data fetching** | `useFetch` fetches on mount, suspends while loading, and refreshes without blanking the screen. |
 | **Imperative data fetching** | `useFetchFn` runs when you call it, exposing `isLoading` / `isRefreshing` / `error` as state. |
 | **Mutations** | `useMutationFn` runs a write and tracks `isMutating`. |
@@ -51,7 +54,6 @@ If you need any of the below features, reach for [TanStack Query](https://tansta
 | **Devtools** | No cache inspector. Use the network tab, or log from the `onRequest` / `onResponse` interceptors. |
 | **Selectors / structural sharing** | Each refresh replaces `data` wholesale. |
 
-
 ## Support
 
 If you find **fetchwire** helpful and want to support its development, you can buy me a coffee via:
@@ -61,15 +63,17 @@ If you find **fetchwire** helpful and want to support its development, you can b
 
 ## Features
 
+- **Two entry points**
+  - `fetchwire` — the transport: `initWire`, `wireData`, `wireRaw`, `ApiError`. Imports no React, so a Node script or a server action can use it on its own.
+  - `fetchwire/react` — the cache and the hooks: `useFetch`, `useFetchFn`, `useMutationFn`, `prefetch`, `fetchClient`.
+
 - **Global configuration with `initWire`**
   - Configure `baseUrl`, default headers, and how to read the auth token.
-  - Register a single global `onError` interceptor for every non-OK response (branch on `error.statusCode` to handle 401/403/etc).
+  - Register a single global `onError` interceptor that sees every `ApiError` fetchwire throws (branch on `error.code` and `error.status`).
   - Per-request `skipToken` flag on `wireData` / `wireRaw` to send a request without an `Authorization` header (e.g. the token-refresh call, login).
   - `onRequest` interceptor — called before every request with the full URL and `RequestInit`.
   - `onResponse` interceptor — called after every response, before the body is parsed.
-  - Optional `transformError` to normalize server error payloads into `ApiError`.
   - Optional `transformResponse` to pull the payload out of an envelope response.
-  - Converts server and network errors into a typed `ApiError`.
 
 - **React hooks for reading and writing, wired together by tags**
   - **`useFetch`** — Suspense-based reading: fetches on mount, suspends while loading, refreshes without blocking via `useTransition`.
@@ -96,9 +100,14 @@ pnpm add fetchwire
 
 ### Peer expectations
 
-- Requires **React 19+** (the `useFetch` hook uses React's `use()` API).
+- `react` is an **optional** peer dependency. Import from `fetchwire/react` and you need **React 19+** (the `useFetch` hook uses React's `use()` API). Import only from `fetchwire` and React never has to be installed.
 - TypeScript is recommended but not required.
 - For React Native / Expo, make sure the global `fetch` is available (default in modern RN / Expo).
+
+```ts
+import { initWire, wireData, ApiError } from "fetchwire";
+import { useFetch, useMutationFn, prefetch, fetchClient } from "fetchwire/react";
+```
 
 ---
 
@@ -110,7 +119,7 @@ Call `initWire` once, as early as possible in your app lifecycle.
 
 ```ts
 // src/api/wire.ts
-import { ApiError, initWire } from "fetchwire";
+import { initWire } from "fetchwire";
 
 export function setupWire() {
   initWire({
@@ -129,21 +138,6 @@ export function setupWire() {
     transformResponse(json) {
       return (json as { data: unknown }).data;
     },
-    // Optional: normalize a server error payload into ApiError
-    transformError(error) {
-      const rawError = error as {
-        message?: string;
-        error?: string;
-        code?: string;
-        statusCode?: number;
-        status?: number;
-      };
-      return new ApiError(
-        rawError.message ?? "Unknown server error",
-        rawError.error ?? rawError.code ?? "UNKNOWN",
-        rawError.statusCode ?? rawError.status,
-      );
-    },
     interceptors: {
       onRequest: (url, requestInit) => {
         // Called before every request.
@@ -158,10 +152,10 @@ export function setupWire() {
         console.log(`← ${response.status} ${url}`);
       },
       onError: (error) => {
-        // Called for EVERY non-OK response — the single error sink.
-        // Branch on error.statusCode to handle specific cases:
-        //   if (error.statusCode === 401) // redirect to login, clear token
-        //   else if (error.statusCode === 403) // show "no permission"
+        // Called for EVERY ApiError fetchwire throws — the single error sink.
+        //   if (error.code === "NETWORK_ERROR") // show "you are offline"
+        //   else if (error.status === 401) // redirect to login, clear token
+        //   else if (error.status === 403) // show "no permission"
         //   else // show a global toast notification
       },
     },
@@ -230,7 +224,6 @@ export async function deleteTodoApi(id: string) {
 }
 ```
 
-
 ---
 
 ### 2. Read data with `useFetch` (Suspense-based)
@@ -263,7 +256,7 @@ const { data: todos } = useFetch(() => getTodosApi(filter), {
 ```tsx
 // src/components/TodoList.tsx
 import { Suspense } from "react";
-import { useFetch } from "fetchwire";
+import { useFetch } from "fetchwire/react";
 import { getTodosApi } from "../api/todo-api";
 
 // Parent: wrap with Suspense + ErrorBoundary
@@ -319,7 +312,7 @@ function TodoList() {
 ```tsx
 // src/components/TodoList.tsx
 import { useEffect } from "react";
-import { useFetchFn } from "fetchwire";
+import { useFetchFn } from "fetchwire/react";
 import { getTodosApi, type Todo } from "../api/todo-api";
 
 export function TodoList() {
@@ -389,7 +382,7 @@ executeMutationFn(undefined, { onSuccess, onError });
 ```tsx
 // src/components/TodoActions.tsx
 import { FormEvent, useState } from "react";
-import { useMutationFn } from "fetchwire";
+import { useMutationFn } from "fetchwire/react";
 import {
   createTodoApi,
   toggleTodoApi,
@@ -462,8 +455,6 @@ Invalidating a tag does two things for every `fetchKey` mapped to it:
 
 A failed mutation invalidates nothing.
 
-> **Constraint:** Tag strings must not contain commas. Commas are used internally to serialize the tag array into a stable dependency key. Use hyphens or underscores instead (e.g. `'user-123'`, `'todo_list'`).
-
 ---
 
 ### 6. Warm the cache with `prefetch`
@@ -471,7 +462,7 @@ A failed mutation invalidates nothing.
 `prefetch` starts loading data before a component mounts — in a route loader, an event handler, or during navigation. The Promise is stored in the Promise cache, so a later `useFetch` / `useFetchFn` with the same `fetchKey` resolves instantly without a duplicate request.
 
 ```tsx
-import { prefetch } from "fetchwire";
+import { prefetch } from "fetchwire/react";
 import { getTodosApi } from "../api/todo-api";
 
 // In a route loader or link hover handler
@@ -522,36 +513,58 @@ transformResponse: (json) => (json as { data: unknown }).data;
 
 Only the payload is yours to change. The HTTP status stays on the `Response`, reachable through `wireRaw` or the `onResponse` interceptor, so a transform can never disagree with the transport about what happened.
 
-### Synthetic error codes
-
-When a request fails or a response cannot be read, fetchwire throws an `ApiError` whose `errorCode` says which case happened:
-
-| `errorCode` | When | `statusCode` |
-| --- | --- | --- |
-| `"NETWORK_ERROR"` | `fetch()` rejected — the request never completed | `520` |
-| `"EMPTY_BODY"` | The response completed with no body on a status that should have carried one. The message carries the `content-length` header, which tells you whether the sender sent nothing (`0`) or the body was lost in transport (absent / non-zero) | the real status |
-| `"INVALID_JSON"` | The body has content but is not JSON — typically a proxy's HTML error page | the real status |
-| `"HTTP_ERROR"` | A non-OK response whose body carried no string `error` field of its own | the real status |
-
-All four are thrown by `wireRaw`, and therefore by `wireData` too.
-
-On a non-OK response, `statusCode` **always** comes from the HTTP response, never from the body. With no `transformError` configured, `message` and `error` are read off the body only when each is a `string`; otherwise they fall back to `HTTP <status>` and `"HTTP_ERROR"`. If your API sends them in another shape (a `string[]` message, a nested `error` object), configure `transformError` — it receives the parsed body untouched.
-
-Errors thrown by your own `onRequest`, `onResponse` or `transformResponse` are **not** wrapped — they propagate as themselves, because a bug in consumer code is not a transport failure.
-
 ### `ApiError`
 
-Transport errors are normalized to an `ApiError` instance, which extends `Error`:
+`wireData` and `wireRaw` throw an `ApiError`, which extends `Error`:
 
 | Field | Type | |
 | --- | --- | --- |
-| `message` | `string` | |
-| `errorCode` | `string \| undefined` | from the server's `error` field, or one of the codes above |
-| `statusCode` | `number \| undefined` | e.g. `401`, `403`, `500`, `520` |
+| `code` | `ApiErrorCode` | which of fetchwire's three failure modes happened |
+| `method` | `string` | the request method, uppercased |
+| `url` | `string` | the full URL, `baseUrl + endpoint` |
+| `response` | `Response \| undefined` | the `Response` `fetch` returned, body already consumed |
+| `status` | `number \| undefined` | `response.status`, read through a getter |
+| `data` | `unknown` | **the error body exactly as the server sent it** |
+| `message` | `string` | `CODE [METHOD] url`, e.g. `HTTP_ERROR [PUT] https://api.example.com/tenants/me` |
 
-`useFetchFn`'s `error` and `useMutationFn`'s `onError` always receive a real `ApiError`, including for values `wireRaw` does not itself wrap — a rejected `getToken()`, an interceptor, or your callback throwing before the request is made.
+`code` is a closed union of the three outcomes fetchwire itself can produce:
 
-`useFetch` does **not** normalize: a rejected Promise reaches the `<ErrorBoundary>` exactly as it was thrown. Pass a `wireData` / `wireRaw` call and that is already an `ApiError`; pass a plain function that throws and the boundary sees the raw value.
+| `code` | When | `status` | `data` |
+| --- | --- | --- | --- |
+| `"HTTP_ERROR"` | The server answered with a non-OK status | the real status | the parsed JSON body, the raw text when it is not JSON, `undefined` when there was none |
+| `"NETWORK_ERROR"` | `fetch()` rejected — DNS, TLS, connection refused, timeout, abort. No HTTP exchange happened | `undefined` | `undefined` |
+| `"PARSE_ERROR"` | An OK response whose body is not JSON — a proxy's HTML page, or an empty body | the real status | the raw text |
+
+Errors thrown by your own `onRequest`, `onResponse` or `transformResponse` propagate as themselves, because a bug in consumer code is not a transport failure.
+
+### Your API's error codes live in `data`
+
+`code` names what **fetchwire** could not do. What your **server** decided is in `data`, untouched, so a field fetchwire has never heard of survives the trip:
+
+```ts
+import { ApiError } from "fetchwire";
+
+type ErrorBody = {
+  error?: string;
+  message?: string | string[];
+  errorDetail?: { violationTotal: number };
+};
+
+export function readErrorBody(error: unknown): ErrorBody {
+  return error instanceof ApiError ? ((error.data as ErrorBody) ?? {}) : {};
+}
+```
+
+```ts
+try {
+  await updateTenantApi(input);
+} catch (error) {
+  const { error: serverCode, errorDetail } = readErrorBody(error);
+  if (serverCode === "TENANT_INACTIVE") showTenantInactiveDialog(errorDetail);
+}
+```
+
+This is the narrowing TanStack Query recommends, and the shape ky (`error.data`), ofetch (`error.data`) and axios (`error.response.data`) all use. fetchwire has no transform hook for errors: the body arrives intact, so the reading belongs where the error is handled.
 
 ### Reading errors in components
 
@@ -564,18 +577,17 @@ const { error } = useFetchFn(getTodosApi, { fetchKey: "todos" });
 if (error) return <div>Error: {error.message}</div>;
 ```
 
-**With `useMutationFn`** — handle errors with `onError`:
+**With `useMutationFn`** — handle errors with `onError`. `error` is typed by `TError`, which defaults to `ApiError`:
 
 ```tsx
-import { ApiError } from "fetchwire";
-
 // No variables: pass `undefined` first, then the options
 executeMutationFn(undefined, {
   onSuccess: () => {
     /* success logic */
   },
-  onError: (error: ApiError) => {
-    Alert.alert("Login failed", error.message || "Unexpected error");
+  onError: (error) => {
+    const { error: serverCode } = readErrorBody(error);
+    Alert.alert("Login failed", ERROR_COPY[serverCode ?? ""] ?? "Unexpected error");
   },
 });
 
@@ -584,9 +596,19 @@ executeMutationFn(payload, {
   onSuccess: (data) => {
     /* ... */
   },
-  onError: (error: ApiError) => {
+  onError: (error) => {
     /* ... */
   },
+});
+```
+
+### When `fetchFn` is not a `wireData` call
+
+The hooks hand you whatever the function rejected with, untouched. `TError` is only a claim about what that will be, and it defaults to `ApiError` because that is what `wireData` throws. Using another transport, name its error type:
+
+```ts
+const { error } = useFetchFn<Todo[], AxiosError>(() => axios.get("/todos"), {
+  fetchKey: "todos",
 });
 ```
 
@@ -606,7 +628,7 @@ executeMutationFn(payload, {
 `fetchClient.remove(fetchKey)` deletes the rejected Promise from the Promise cache without emitting any tag events, and works whether or not the component is mounted. Call it in the boundary's reset handler **before** the component remounts, so the next render finds an empty cache entry and starts a fresh fetch.
 
 ```tsx
-import { fetchClient } from "fetchwire";
+import { fetchClient } from "fetchwire/react";
 
 // React (web) example using react-error-boundary
 import { ErrorBoundary } from "react-error-boundary";
@@ -637,7 +659,7 @@ function TodoPage() {
 
 ```tsx
 // React Native example (custom ErrorBoundary with a resetKeys prop or similar)
-import { fetchClient } from "fetchwire";
+import { fetchClient } from "fetchwire/react";
 
 function WageDetailPage({ wageId }: { wageId: string }) {
   const fetchKey = `receipt-payment-list-in-wage-${wageId}`;
@@ -671,7 +693,7 @@ fetchwire is an HTTP client, so supply-chain scanners will flag it for **network
 | Hardcoded hosts or endpoints | **none** |
 | Destination | `baseUrl + endpoint`, both supplied by you via `initWire` |
 | Telemetry / analytics / phone-home | **none** |
-| Runtime dependencies | **0** (`react` is a peer dependency) |
+| Runtime dependencies | **0** (`react` is an optional peer dependency) |
 | Install scripts (`preinstall` / `postinstall`) | **none** |
 | Published files | `dist` only |
 | Registry provenance | signed, with SLSA attestation |
@@ -693,7 +715,6 @@ type WireConfig = {
   baseUrl: string;
   headers?: HeadersInit;
   getToken: () => Promise<string | null>;
-  transformError?: (error: unknown) => ApiError;
   transformResponse?: (json: unknown) => unknown;
   interceptors?: WireInterceptors;
 };
@@ -706,12 +727,11 @@ Initializes fetchwire with the required configuration. Must be executed at the a
 - **`baseUrl`**: Base URL that all relative endpoints will be appended to, e.g. `"https://api.example.com"`.
 - **`headers`**: Default headers applied to every request. Merged lowest to highest: **these headers → `Authorization` → per-request headers**. To drop one on a single request, delete it from `onRequest`: `(url, options) => (options.headers as Headers).delete("x-client")`.
 - **`getToken`**: A Promise-returning function that resolves to the current access token, or `null` if not logged in. When a non-empty token is returned, fetchwire will send it as `Authorization: Bearer <token>`.
-- **`transformError`** (optional): Transforms the raw error response from the server into the standardized `ApiError` shape. It receives the parsed error body exactly as the server sent it — nothing is filled in or filtered first — so a `string[]` message or a nested `error` object is readable here. An `ApiError` returned without a `statusCode` gets the response status.
-- **`transformResponse`** (optional): Extracts the payload from the parsed JSON body. Runs after `JSON.parse` succeeds; whatever it returns **is** the payload `wireData<T>` resolves, and what `wireRaw<T>` puts on `.data`. It is not called when there is no body to parse (`204`, `205`, `HEAD`), nor for a non-OK response. If not provided, the body is the payload.
+- **`transformResponse`** (optional): Extracts the payload from the parsed JSON body. Runs after `JSON.parse` succeeds; whatever it returns **is** the payload `wireData<T>` resolves, and what `wireRaw<T>` puts on `.data`. It is not called when there is no body to parse (`204`, `205`, `HEAD`), nor for a non-OK response — an error body reaches you verbatim on `ApiError.data`. If not provided, the body is the payload.
 - **`interceptors`** (optional):
   - **`onRequest(url, options)`**: Called before every request, with the full URL and the final `RequestInit` object. Use this to add dynamic headers, inject trace IDs, or log outgoing requests. Mutations to `options` (e.g. `options.headers.set(...)`) are reflected in the actual request because both this interceptor and `fetch` share the same object.
   - **`onResponse(url, response)`**: Called after every response, before the body is parsed. Use this to log response metadata, inspect headers, or record timing. **Do not consume the response body** (e.g. do not call `response.json()` or `response.text()`) — doing so will exhaust the body stream, causing the subsequent read inside `wireRaw` to fail. Use `response.clone()` if you need to read the body here.
-  - **`onError(error)`**: Called for **every** non-OK response (the single global error sink). Branch on `error.statusCode` to handle specific cases.
+  - **`onError(error)`**: The single global error sink — called for **every** `ApiError` fetchwire throws, whatever its `code`, so a failed connection reaches it just like a failed HTTP exchange. Branch on `error.code`, then on `error.status`. Errors raised by your own interceptors or by `transformResponse` do not reach it.
 
 ### `updateWireConfig(configPartial)`
 
@@ -754,7 +774,7 @@ Sends an API request and returns the payload, dropping the `Response` that `wire
 - **`options`**: The request options — a `RequestInit` plus optional fetchwire flags:
   - **`skipToken`** (optional): When `true`, fetchwire does **not** call `getToken` and adds **no** `Authorization` header.
 - **Returns**: The payload, as produced by `transformResponse`, or the parsed body when no transform is configured. `undefined` for a `204`, a `205` or any `HEAD` — see [Payload shape](#payload-shape).
-- **Throws**: `ApiError` — see [Synthetic error codes](#synthetic-error-codes).
+- **Throws**: `ApiError` — see [`ApiError`](#apierror).
 
 ```ts
 const user = await wireData<User>("/user/me", { method: "GET" });
@@ -827,21 +847,19 @@ Fetches immediately on mount and suspends the component while data is loading. T
 - **`refreshFetch()`**: Manually triggers a refresh while the component is mounted. Uses `useTransition` internally so the current data stays visible while the refresh loads. **Cannot be used to retry from an ErrorBoundary** — see [Retrying after an API error](#retrying-after-an-api-error).
 - **`isRefreshing`**: `true` while a refresh is in flight.
 
-> **Note:** Tag strings must not contain commas.
-
 ---
 
-### `useFetchFn<T>(fetchFn, options)`
+### `useFetchFn<T, TError>(fetchFn, options)`
 
 ```ts
-function useFetchFn<T>(
+function useFetchFn<T, TError = ApiError>(
   fetchFn: () => Promise<T>,
   options: FetchOptions,
 ): {
   data: T | null;
   isLoading: boolean;
   isRefreshing: boolean;
-  error: ApiError | null;
+  error: TError | null;
   executeFetchFn: () => Promise<T | null>;
   refreshFetchFn: () => Promise<T | null>;
   reset: () => void;
@@ -855,30 +873,28 @@ Runs a fetch on demand and tracks its loading, refreshing, and error state.
 - **`data`**: The resolved value of type `T`, or `null` if not yet fetched.
 - **`isLoading`**: `true` while the initial fetch is in flight.
 - **`isRefreshing`**: `true` while a refresh is in flight.
-- **`error`**: An `ApiError` if the last fetch failed, otherwise `null`.
+- **`error`**: Whatever the last failed run rejected with, untouched, otherwise `null`. `TError` defaults to `ApiError` because that is what `wireData` / `wireRaw` throw; set it yourself when `fetchFn` uses another transport.
 - **`executeFetchFn()`**: Manually triggers the initial fetch. If `fetchKey` is already in the Promise cache, it reuses the stored Promise and issues no request. If the run fails, `fetchKey` is removed from the cache so the next `executeFetchFn()` retries for real. Returns `Promise<T | null>` — `null` on failure.
 - **`refreshFetchFn()`**: Manually triggers a refresh: skips the cache read and overwrites the cached Promise with the new one. Returns `Promise<T | null>`.
 - **`reset()`**: Resets state back to the initial idle state and retires every in-flight run, so a late response cannot overwrite what was just cleared. Does not touch the Promise cache.
 
 Overlapping runs resolve by recency, not by arrival: several runs can be in flight against one state, and only the newest one writes.
 
-> **Note:** Tag strings must not contain commas.
-
 ---
 
-### `useMutationFn<T, TVariables>(mutationFn, options?)`
+### `useMutationFn<T, TVariables, TError>(mutationFn, options?)`
 
 ```ts
 type MutationOptions = {
   invalidatesTags?: string[];
 };
 
-type ExecuteMutationOptions<T> = {
+type ExecuteMutationOptions<T, TError = ApiError> = {
   onSuccess?: (data: T | null) => void | Promise<void>;
-  onError?: (error: ApiError) => void | Promise<void>;
+  onError?: (error: TError) => void | Promise<void>;
 };
 
-function useMutationFn<T, TVariables = void>(
+function useMutationFn<T, TVariables = void, TError = ApiError>(
   mutationFn: (variables: TVariables) => Promise<T>,
   options?: MutationOptions,
 ): {
@@ -886,7 +902,7 @@ function useMutationFn<T, TVariables = void>(
   isMutating: boolean;
   executeMutationFn: (
     variables: TVariables,
-    executeOptions?: ExecuteMutationOptions<T>,
+    executeOptions?: ExecuteMutationOptions<T, TError>,
   ) => Promise<T | null>;
   reset: () => void;
 };
@@ -907,8 +923,6 @@ Three behaviors worth knowing:
 - **The callbacks are awaited.** `await executeMutationFn(...)` settles only after `onSuccess` / `onError` has finished. `isMutating` goes `false` earlier: it tracks the request, not the callback.
 - **Overlapping runs resolve by recency.** Only the newest run writes `data` / `isMutating`, while every run still invalidates its tags and calls its own `onSuccess` / `onError`.
 
-> **Note:** Tag strings must not contain commas.
-
 ---
 
 ### `prefetch<T>(fetchFn, options)`
@@ -928,7 +942,7 @@ Eagerly runs `fetchFn` and caches its Promise under `options.fetchKey`, so a lat
 - **Returns**: The cached Promise for `options.fetchKey`. If one already exists, it is returned as-is and `fetchFn` is not called — but `tags` are still registered, since the Promise cache and the tag map are separate stores.
 
 ```ts
-import { prefetch } from "fetchwire";
+import { prefetch } from "fetchwire/react";
 import { getTodosApi } from "./api/todo-api";
 
 // Call in a route loader, on link hover, or before navigating
@@ -963,7 +977,7 @@ const fetchClient: FetchClient;
 - **`clear()`** — clears every Promise in the Promise cache and the tag-to-fetchKey map. Call this on logout so no stale cached data persists into the next session.
 
   ```ts
-  import { fetchClient } from "fetchwire";
+  import { fetchClient } from "fetchwire/react";
 
   function handleLogout() {
     localStorage.removeItem("access_token");
@@ -974,7 +988,7 @@ const fetchClient: FetchClient;
 - **`invalidateTags(tags)`** — clears every Promise in the Promise cache whose fetch key is associated with those tags, and emits events to trigger a refresh on mounted components. Called automatically by `useMutationFn` after a successful mutation; exposed for cases where you need to invalidate imperatively (e.g. after a WebSocket push).
 
   ```ts
-  import { fetchClient } from "fetchwire";
+  import { fetchClient } from "fetchwire/react";
 
   fetchClient.invalidateTags(["todos"]);
   ```
@@ -982,7 +996,7 @@ const fetchClient: FetchClient;
 - **`remove(fetchKey)`** — removes a single `fetchKey` from the Promise cache without emitting any events. Use this to clear a rejected Promise so the next render initiates a fresh fetch. See [Retrying after an API error](#retrying-after-an-api-error).
 
   ```ts
-  import { fetchClient } from "fetchwire";
+  import { fetchClient } from "fetchwire/react";
 
   fetchClient.remove("todos");
   ```

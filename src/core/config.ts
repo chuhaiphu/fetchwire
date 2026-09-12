@@ -1,4 +1,4 @@
-import { WireConfig } from '../interface';
+import { WireConfig } from '../interface/wire';
 import { mergeHeaders } from '../util/merge-headers';
 
 let globalWireConfig: WireConfig | null = null;
@@ -6,20 +6,22 @@ let globalWireConfig: WireConfig | null = null;
 /**
  * Initializes fetchwire with the required configuration.
  * Must be executed at the application entry point before any API calls.
- * @param config - The required configuration object including baseUrl and getToken.
+ *
+ * @param config - The configuration object, including `baseUrl` and `getToken`.
  */
 export const initWire = (config: WireConfig): void => {
   globalWireConfig = {
     ...config,
-    // `globalWireConfig.headers` is always a `Headers` no matter which of the three `HeadersInit`
     headers: mergeHeaders(config.headers),
   };
 };
 
 /**
- * Updates the existing configuration.
- * Merges new headers with existing ones and overrides other provided fields.
+ * Updates the existing configuration. `headers` and `interceptors` are each merged one level
+ * deep; every other field is replaced outright.
+ *
  * @param config - A partial configuration object to update.
+ * @throws Error if called before `initWire`.
  */
 export const updateWireConfig = (config: Partial<WireConfig>): void => {
   if (!globalWireConfig) {
@@ -27,17 +29,11 @@ export const updateWireConfig = (config: Partial<WireConfig>): void => {
   }
 
   globalWireConfig = {
-    // Copy existing initial config
     ...globalWireConfig,
-    // Add new config values,
-    // overriding existing ones if duplicated
     ...config,
     headers: mergeHeaders(globalWireConfig.headers, config.headers),
     interceptors: {
-      // Copy existing interceptors
       ...globalWireConfig.interceptors,
-      // Add new interceptor values,
-      // overriding existing ones if duplicated
       ...config.interceptors,
     },
   };
@@ -45,8 +41,9 @@ export const updateWireConfig = (config: Partial<WireConfig>): void => {
 
 /**
  * Retrieves the current global configuration state.
- * @throws Error if the configuration state is null.
- * @returns The validated WireConfig object.
+ *
+ * @throws Error if called before `initWire`.
+ * @returns The current `WireConfig`.
  */
 export const getWireConfig = (): WireConfig => {
   if (!globalWireConfig) {

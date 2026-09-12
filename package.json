@@ -1,7 +1,7 @@
 {
   "name": "fetchwire",
   "type": "module",
-  "version": "6.0.1",
+  "version": "7.0.0",
   "description": "A lightweight, focused API fetching library for React 19+ applications.",
   "repository": {
     "type": "git",
@@ -19,6 +19,16 @@
       "require": {
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react.d.ts",
+        "default": "./dist/react.js"
+      },
+      "require": {
+        "types": "./dist/react.d.cts",
+        "default": "./dist/react.cjs"
       }
     },
     "./package.json": "./package.json"
@@ -65,5 +75,11 @@
       "type": "custom",
       "url": "https://paypal.me/doanvinhphu"
     }
-  ]
+  ],
+  "sideEffects": false,
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
 }

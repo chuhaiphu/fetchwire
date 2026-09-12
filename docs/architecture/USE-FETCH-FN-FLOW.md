@@ -40,7 +40,7 @@ flowchart LR
     CACHED --> S{"SETTLED"}
     FRESH --> S
     S -->|"fulfilled"| OKS["setState { data, isLoading:false,<br/>isRefreshing:false, error:null }"]
-    S -->|"rejected"| ERRS["remove(fetchKey)<br/>setState { data:null, error: ApiError }"]
+    S -->|"rejected"| ERRS["remove(fetchKey)<br/>setState { data:null, error: what fetchFn threw }"]
 ```
 
 Unlike `useFetch`, there is **no** `<Suspense>`/`<ErrorBoundary>` in the picture — every branch ends in
@@ -79,7 +79,7 @@ sequenceDiagram
     Cache-->>H: true → cache HIT, and isRefresh is false so reuse is allowed
 
     Note over H,Cache: The consumer's `fn` callback is NEVER invoked on this path.<br/>No request leaves the app.
-    H->>FC: registerTags(fetchKey, tagsKey.split(','))
+    H->>FC: registerTags(fetchKey, JSON.parse(tagsKey))
     FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
     Note over FC,Cache: registerTags only. This path never calls cachePromiseAndRegisterTags
     H->>Cache: get(fetchKey)
@@ -91,10 +91,10 @@ sequenceDiagram
         alt fulfilled
             H->>H: setState(data, isLoading: false, isRefreshing: false, error: null)
             H-->>Cmp: re-render — { data, isLoading: false, isRefreshing: false, error: null }
-        else rejected (ApiError)
+        else rejected
             H->>FC: remove(fetchKey) — do not leave a failed promise in the cache
             H->>H: setState(data: null, isLoading: false, isRefreshing: false, error: apiError)
-            H-->>Cmp: re-render — { data: null, isLoading: false, isRefreshing: false, error: ApiError }
+            H-->>Cmp: re-render — { data: null, isLoading: false, isRefreshing: false, error: the rejection value }
         end
         Note over H,FC: every step in this band is inside `if (requestId === latestRequestIdRef.current)`
     end
@@ -135,7 +135,7 @@ sequenceDiagram
     Fn-->>H: promise A (pending)
     H->>H: rawPromise = A — cached exactly as `fn` returned it, no derived promise
 
-    H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, tagsKey.split(','))
+    H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, JSON.parse(tagsKey))
     FC->>FC: void rawPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.
     FC->>Cache: set(fetchKey, rawPromise)
     FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
@@ -150,10 +150,10 @@ sequenceDiagram
         alt fulfilled
             H->>H: setState(data, isLoading: false, isRefreshing: false, error: null)
             H-->>Cmp: re-render — { data, isLoading: false, isRefreshing: false, error: null }
-        else rejected (ApiError)
+        else rejected
             H->>FC: remove(fetchKey) — do not leave a failed promise in the cache
             H->>H: setState(data: null, isLoading: false, isRefreshing: false, error: apiError)
-            H-->>Cmp: re-render — { data: null, isLoading: false, isRefreshing: false, error: ApiError }
+            H-->>Cmp: re-render — { data: null, isLoading: false, isRefreshing: false, error: the rejection value }
         end
         Note over H,FC: every step in this band is inside `if (requestId === latestRequestIdRef.current)`
     end
@@ -208,7 +208,7 @@ sequenceDiagram
     Fn-->>H: promise A (pending)
     H->>H: rawPromise = A — cached exactly as `fn` returned it, no derived promise
 
-    H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, tagsKey.split(','))
+    H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, JSON.parse(tagsKey))
     FC->>FC: void rawPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.
     FC->>Cache: set(fetchKey, rawPromise) — replaces whatever was stored
     FC->>FC: map each tag → fetchKey (tagToFetchKeysMap) — rebuilds what invalidateTags wiped
@@ -222,7 +222,7 @@ sequenceDiagram
         alt fulfilled
             H->>H: setState(data, isLoading: false, isRefreshing: false, error: null)
             H-->>Cmp: re-render with fresh data
-        else rejected (ApiError)
+        else rejected
             H->>FC: remove(fetchKey) — do not leave a failed promise in the cache
             H->>H: setState(data: null, isLoading: false, isRefreshing: false, error: apiError)
             H-->>Cmp: re-render with error
@@ -241,11 +241,12 @@ sequenceDiagram
 > number on entry (`++latestRequestIdRef.current`) and may write only while it still holds the latest one.
 > Without it the slowest run wins by landing last, which shows the **older** data.
 
-> **Why `tagsKey = tags.join(',')`.** `options.tags` is a new array on every render. Here the joined string
-> does double duty: it keeps the subscription `useEffect` from re-running each render, **and** it is a
-> dependency of the `useCallback` that memoizes `execute` — without a stable primitive, `executeFetchFn`
-> would change identity every render and the consumer's `useEffect(() => { executeFetchFn() },
-> [executeFetchFn])` would loop forever. (Constraint: tag strings must not contain commas.)
+> **Why `tagsKey = JSON.stringify(tags)`.** `options.tags` is a new array on every render. Here the
+> serialized string does double duty: it keeps the subscription `useEffect` from re-running each render,
+> **and** it is a dependency of the `useCallback` that memoizes `execute` — without a stable primitive,
+> `executeFetchFn` would change identity every render and the consumer's
+> `useEffect(() => { executeFetchFn() }, [executeFetchFn])` would loop forever. The array is read back
+> with `JSON.parse` inside the callback, so a tag may contain any character.
 
 ---
 

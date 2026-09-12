@@ -15,7 +15,7 @@ and the library maps between them.
 
 Every read in fetchwire carries a **`fetchKey`** — a string that is the read's **identity**. fetchwire caches
 the read's promise under this key in a module-level store
-([`promiseCacheStore`](../../src/core/promise-cache-store.ts)), so two reads with the same `fetchKey` share a
+([`promiseCacheStore`](../../src/cache/promise-cache-store.ts)), so two reads with the same `fetchKey` share a
 single cached promise and the same request is never fired twice.
 
 Name it so that two reads share a `fetchKey` **iff** they are the same read and may share a cache entry — the
@@ -95,8 +95,8 @@ Only new promises should overwrite the cache; tag links must be registered in **
 
 - **Tags are matched by exact string.** There is no hierarchy or wildcard; `'car-list'` does not imply
   `'car-7'`. Overlap is achieved only by a read carrying **multiple** tags.
-- **Tag strings must not contain commas.** Reads join their tags into a single key with `,`, so a comma in a
-  tag would split it. (This is why a read with no tags degenerates to `['']`, which the index ignores.)
+- **A tag may contain any character.** Reads serialize their tags with `JSON.stringify` to build a stable
+  dependency key, and read the array back with `JSON.parse`. A read with no tags carries an empty array.
 - **A rejected read stays cached.** Invalidation clears entries by tag; to force a single failed key to
   refetch outside the tag system, use `fetchClient.remove(fetchKey)`.
 

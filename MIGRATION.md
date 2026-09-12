@@ -4,6 +4,230 @@ What to change when upgrading. For **why** each change was made, see the [CHANGE
 
 ---
 
+# 6.x → 7.0.0
+
+fetchwire 7 stops shaping your errors and splits the package in two. `ApiError` now carries the
+server's error body verbatim, so `transformError` has nothing left to do and is gone.
+
+| # | If you have | Change it to | Compiler catches it? |
+| --- | --- | --- | --- |
+| 1 | `import { useFetch, useMutationFn, prefetch, fetchClient } from "fetchwire"` | import them from `"fetchwire/react"` | ✅ `TS2305` |
+| 2 | `transformError` in `initWire` | delete it; read `error.data` at the catch site | ✅ `TS2353` |
+| 3 | `new ApiError(message, errorCode, statusCode)` | `new ApiError({ code, method, url, response, data })` | ✅ `TS2554` |
+| 4 | `error.errorCode` for **your API's** code | `readErrorBody(error).error` | ✅ `TS2339` |
+| 5 | `error.errorCode` for **fetchwire's** code | `error.code` | ✅ `TS2339` |
+| 6 | `error.statusCode` | `error.status` | ✅ `TS2339` |
+| 7 | `error.message` showing the server's text | `readErrorBody(error).message` | ❌ **silent** |
+| 8 | `statusCode === 520` for a network failure | `error.code === "NETWORK_ERROR"` | ❌ **silent** |
+| 9 | `"EMPTY_BODY"` / `"INVALID_JSON"` | both are `"PARSE_ERROR"` | ✅ `TS2367` |
+| 10 | An `onError` interceptor assuming a response exists | it now fires for `NETWORK_ERROR` too, where `status` is `undefined` | ❌ **silent** |
+| 11 | A subclass of `ApiError` built to carry an extra field | delete it — the field is already on `error.data` | ⚠️ depends |
+
+Do **7, 8 and 10** by hand — nothing fails to compile. The rest the compiler will find for you.
+
+## Finding every site
+
+```bash
+grep -rnE "from ['\"]fetchwire['\"]" src/            # 1
+grep -rn "transformError" src/                       # 2, 3
+grep -rn "errorCode" src/                            # 4, 5
+grep -rn "statusCode" src/                           # 6, 8
+grep -rn "error.message" src/                        # 7
+grep -rn "520" src/                                  # 8
+grep -rnE "EMPTY_BODY|INVALID_JSON" src/             # 9
+grep -rn "onError" src/                              # 10
+grep -rn "extends ApiError" src/                     # 11
+```
+
+## 1. Hooks move to `fetchwire/react`
+
+`TS2305: Module '"fetchwire"' has no exported member 'useFetch'.`
+
+```diff
+- import { initWire, wireData, useFetch, fetchClient } from "fetchwire";
++ import { initWire, wireData } from "fetchwire";
++ import { useFetch, fetchClient } from "fetchwire/react";
+```
+
+`fetchwire` is the transport — `initWire`, `updateWireConfig`, `getWireConfig`, `wireData`,
+`wireRaw`, `ApiError`. `fetchwire/react` is the cache and the hooks — `useFetch`, `useFetchFn`,
+`useMutationFn`, `prefetch`, `fetchClient`.
+
+There is still one package and one `npm install fetchwire`. What changed is that the transport
+entry point imports no React, so `react` is now an **optional** peer dependency: a Node script or
+a server action can use `wireData` without React installed. Nothing to do if you already have
+React — npm keeps installing it.
+
+## 2. `transformError` removed
+
+`TS2353: Object literal may only specify known properties, and 'transformError' does not exist in
+type 'WireConfig'.`
+
+The error body now reaches you untouched on `error.data`, so there is nothing to normalize up
+front. Delete the option and read the body where you handle the error.
+
+```diff
+  initWire({
+    baseUrl: API_URL,
+    getToken,
+-   transformError: (error) => {
+-     const raw = error as { statusCode?: number; message?: string | string[]; error?: string };
+-     const message = Array.isArray(raw.message) ? raw.message[0] : raw.message;
+-     return new ApiError(message ?? "Something went wrong", raw.error ?? "UNKNOWN", raw.statusCode);
+-   },
+  });
+```
+
+Write one reader in your app instead:
+
+```ts
+// src/utils/read-error-body.ts
+import { ApiError } from "fetchwire";
+
+export type ErrorBody = {
+  error?: string;
+  message?: string | string[];
+  errorDetail?: ErrorDetail;
+};
+
+export function readErrorBody(error: unknown): ErrorBody {
+  return error instanceof ApiError ? ((error.data as ErrorBody) ?? {}) : {};
+}
+```
+
+## 3. `ApiError`'s constructor takes one object
+
+`TS2554: Expected 1 arguments, but got 3.`
+
+```diff
+- throw new ApiError("Upload failed", "UPLOAD_FAILED", response.status);
++ throw new ApiError({
++   code: "HTTP_ERROR",
++   method: "PUT",
++   url: `${baseUrl}/tenants/me/settings/logo`,
++   response,
++   data: body,
++ });
+```
+
+You only need this when you construct an `ApiError` yourself — typically a hand-rolled upload that
+uses a transport other than `fetch`.
+
+## 4-5. `errorCode` splits in two
+
+`TS2339: Property 'errorCode' does not exist on type 'ApiError'.`
+
+One field used to hold two unrelated things: your server's code (`"TENANT_INACTIVE"`) and
+fetchwire's own (`"INVALID_JSON"`). They now live apart.
+
+```diff
+- if (error.errorCode === "TENANT_INACTIVE") showTenantDialog();
++ if (readErrorBody(error).error === "TENANT_INACTIVE") showTenantDialog();
+```
+
+```diff
+- if (error.errorCode === "NETWORK_ERROR") showOfflineToast();
++ if (error.code === "NETWORK_ERROR") showOfflineToast();
+```
+
+`error.code` is a closed union of `"HTTP_ERROR" | "NETWORK_ERROR" | "PARSE_ERROR"`, so a `switch`
+over it is exhaustive.
+
+## 6. `statusCode` → `status`
+
+`TS2339: Property 'statusCode' does not exist on type 'ApiError'.`
+
+```diff
+- if (error.statusCode === 401) redirectToLogin();
++ if (error.status === 401) redirectToLogin();
+```
+
+`status` is a getter over `error.response`, so it can never disagree with the transport.
+
+## 7. `message` describes the HTTP exchange
+
+**No compile error.** `error.message` used to be the server's sentence when the body carried a
+string `message`. It is now built from the exchange, e.g.
+`HTTP_ERROR [PUT] https://api.example.com/tenants/me` — useful in a log or a stack trace, and
+wrong on a screen.
+
+```diff
+- Alert.alert("Failed", error.message);
++ const { message } = readErrorBody(error);
++ Alert.alert("Failed", Array.isArray(message) ? message[0] : message ?? "Something went wrong");
+```
+
+If your app already keys its own copy off an error code, this changes nothing for you.
+
+## 8. Network failures have no status
+
+**No compile error.** A failed connection used to report `statusCode: 520`, a status no server
+ever sent. It now reports `status: undefined`, and says what happened through `code`.
+
+```diff
+- if (error.statusCode === 520) showOfflineToast();
++ if (error.code === "NETWORK_ERROR") showOfflineToast();
+```
+
+## 9. `EMPTY_BODY` and `INVALID_JSON` merge into `PARSE_ERROR`
+
+`TS2367: This comparison appears to be unintentional.`
+
+Both meant the same thing: an OK response whose body could not be read as JSON. `JSON.parse("")`
+throws on its own, so the empty body needs no case of its own.
+
+```diff
+- if (error.errorCode === "EMPTY_BODY" || error.errorCode === "INVALID_JSON") reportBug();
++ if (error.code === "PARSE_ERROR") reportBug();
+```
+
+The unparsable text is on `error.data`. If you relied on the `content-length` the old message
+carried, read it from `error.response.headers.get("content-length")`.
+
+## 10. `onError` now sees every failure
+
+**No compile error.** It used to fire only for a non-OK response. It now fires for every `ApiError`
+fetchwire throws, which is what makes it a sink worth having: a dropped connection reaches it too.
+
+```diff
+  onError: (error) => {
++   if (error.code === "NETWORK_ERROR") return showOfflineToast();
+    if (error.status === 401) return redirectToLogin();
+    showToast(error.message);
+  },
+```
+
+Guard anything that assumed a response existed — on a `NETWORK_ERROR`, `error.status` and
+`error.response` are both `undefined`.
+
+## 11. Subclasses of `ApiError` are no longer needed
+
+Extending `ApiError` used to be the only way to carry a field it had no slot for. That field is
+already on `error.data`.
+
+```diff
+- export class DetailedApiError extends ApiError {
+-   constructor(message: string, errorCode?: string, statusCode?: number, readonly errorDetail?: ErrorDetail) {
+-     super(message, errorCode, statusCode);
+-     this.name = "DetailedApiError";
+-   }
+- }
+-
+- export function readErrorDetail(error: unknown): ErrorDetail | undefined {
+-   return error instanceof DetailedApiError ? error.errorDetail : undefined;
+- }
++ export function readErrorDetail(error: unknown): ErrorDetail | undefined {
++   return readErrorBody(error).errorDetail;
++ }
+```
+
+## Tag strings may contain commas again
+
+Nothing to change, and one constraint to forget. Tag arrays are serialized with `JSON.stringify`
+rather than `join(",")`, so `"todo,list"` is one tag now.
+
+---
+
 # 5.x → 6.0.0
 
 fetchwire 6 removes the `HttpResponse` envelope. A request now resolves the payload.

@@ -13,7 +13,7 @@ class EventEmitter {
       this.events[event] = [];
     }
     this.events[event].push(listener);
-    
+
     return {
       remove: () => {
         this.events[event] = this.events[event].filter((l) => l !== listener);

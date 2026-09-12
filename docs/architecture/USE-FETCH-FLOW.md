@@ -67,7 +67,7 @@ sequenceDiagram
         Note over Cmp,React: MOUNT — React calls the component for the first time. This render suspends
         Note over Cmp: component mounts
         Cmp->>H: useFetch(fetch, { fetchKey, tags })
-        H->>H: tagsKey = tags.join(',')
+        H->>H: tagsKey = JSON.stringify(tags)
         H->>Cache: has(fetchKey)
         Cache-->>H: true → a prefetch or another mounted reader already warmed this key
 
@@ -101,8 +101,8 @@ sequenceDiagram
             React-->>H: use(promise) returns the value, whatever it is — the hook does not judge it
             H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
             Note over React: this render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
-        else rejected (ApiError)
-            React-->>Cmp: use(promise) throws the ApiError → nearest Error Boundary fallback shown
+        else rejected
+            React-->>Cmp: use(promise) throws the rejection value → nearest Error Boundary fallback shown
         end
     end
 ```
@@ -129,7 +129,7 @@ sequenceDiagram
         Note over Cmp,React: MOUNT — React calls the component for the first time. This render suspends
         Note over Cmp: component mounts
         Cmp->>H: useFetch(fetch, { fetchKey, tags })
-        H->>H: tagsKey = tags.join(',')
+        H->>H: tagsKey = JSON.stringify(tags)
         H->>Cache: has(fetchKey)
         Cache-->>H: false → cache MISS, no one warmed this key
 
@@ -168,8 +168,8 @@ sequenceDiagram
             React-->>H: use(promise) returns the value, whatever it is — the hook does not judge it
             H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
             Note over React: this render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
-        else rejected (ApiError)
-            React-->>Cmp: use(promise) throws the ApiError → nearest Error Boundary fallback shown<br/>(component unmounts — rawPromise stays cached as rejected)
+        else rejected
+            React-->>Cmp: use(promise) throws the rejection value → nearest Error Boundary fallback shown<br/>(component unmounts — rawPromise stays cached as rejected)
         end
     end
 ```
@@ -256,8 +256,8 @@ sequenceDiagram
             alt fulfilled
                 React-->>H: use(newPromise) returns the fresh value
                 H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
-            else rejected (ApiError)
-                React-->>Cmp: use(newPromise) throws the ApiError → nearest Error Boundary fallback shown
+            else rejected
+                React-->>Cmp: use(newPromise) throws the rejection value → nearest Error Boundary fallback shown
             end
         end
     else reader unmounted before that render runs
@@ -270,9 +270,10 @@ sequenceDiagram
 > the new promise as non-urgent so React keeps the old UI visible (`isRefreshing = true`) instead of
 > flashing the Suspense fallback again.
 
-> **Why `tagsKey = tags.join(',')`.** `options.tags` is a new array on every render, which would make the
-> subscription `useEffect` re-run each render. Joining to a stable string key makes the effect depend on
-> the tag _values_, not the array identity. (Constraint: tag strings must not contain commas.)
+> **Why `tagsKey = JSON.stringify(tags)`.** `options.tags` is a new array on every render, which would
+> make the subscription `useEffect` re-run each render. Serializing to a stable string key makes the
+> effect depend on the tag _values_, and the array is read back with `JSON.parse` where it is needed, so
+> a tag may contain any character.
 
 ---
 
@@ -333,7 +334,7 @@ sequenceDiagram
         React-->>Cmp: component suspends → nearest Suspense fallback shown
     end
 
-    Note over Cache,React: promise B settles<br/>React retries the suspended tree — fulfilled → data, rejected (ApiError) → Error Boundary
+    Note over Cache,React: promise B settles<br/>React retries the suspended tree — fulfilled → data, rejected → Error Boundary
 ```
 
 > **Why the promise is re-pointed during render, not in an Effect.** An Effect runs only after a render

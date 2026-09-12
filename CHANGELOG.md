@@ -3,6 +3,125 @@
 > Upgrade instructions live in [MIGRATION.md](./MIGRATION.md). This file records **what** changed and
 > **why**.
 
+## [7.0.0] - 2026-09-12
+
+fetchwire no longer decides what an error means. The server's error body arrives untouched, and the
+package splits along the seam it always had: a transport that knows nothing about React, and hooks
+that know nothing about the transport.
+
+### Breaking Changes
+
+- **`ApiError` carries the `Response` and the error body. `transformError` removed.**
+
+  `ApiError` had three slots — `message`, `errorCode`, `statusCode` — and everything else the server
+  sent was discarded. `transformError` existed to bend a body back into those three, and the only way
+  to keep a fourth field was to subclass `ApiError`.
+
+  It now holds `code`, `method`, `url`, `response` and `data`, where `data` is the parsed error body
+  verbatim. A field fetchwire has never heard of survives the trip, so
+  `transformError` has no work left and is gone.
+
+  ```ts
+  catch (error) {
+    if (error instanceof ApiError) {
+      const body = error.data as { error?: string; errorDetail?: ErrorDetail };
+      if (body.error === "TENANT_INACTIVE") showTenantDialog(body.errorDetail);
+    }
+  }
+  ```
+
+  This is the model ky (`error.data`), ofetch (`error.data`) and axios (`error.response.data`) all
+  converged on, and the narrowing TanStack Query documents in place of a custom error generic. None
+  of the four offers a transform hook, because there is nothing to transform once the body is intact.
+
+  A transform also could not pay for itself: `transformResponse` changes a type you declared, since
+  `wireData<T>` promises `T`. An error is caught as `unknown` and has to be narrowed either way.
+
+- **`errorCode` splits into `code` and `data`.**
+
+  One field held two unrelated vocabularies: fetchwire's own outcomes (`"INVALID_JSON"`) and the
+  application's (`"TENANT_INACTIVE"`), so a `switch` over it mixed transport failures with business
+  rules. `code` is now a closed union of `"HTTP_ERROR" | "NETWORK_ERROR" | "PARSE_ERROR"` and nothing
+  else, which makes the `switch` exhaustive. Your codes live in `data`.
+
+- **`statusCode` → `status`, and a failed connection no longer invents one.**
+
+  `status` is a getter over `response.status`, so a copy can never drift from what the transport
+  reported. A `NETWORK_ERROR` reports `undefined`, replacing the fabricated `520` — no HTTP exchange
+  happened, so there is no status to report. This is the same defect `6.0.0` removed from the success
+  path, on the failure path.
+
+- **`EMPTY_BODY` and `INVALID_JSON` collapse into `PARSE_ERROR`.**
+
+  Both said the same thing: an OK response whose body could not be read as JSON. `JSON.parse("")`
+  throws a `SyntaxError` on its own, so the empty body needs no branch of its own — which also
+  retires the `content-length` archaeology in the old message. The unparsable text is on `data`.
+
+- **`ApiError`'s constructor takes one object.**
+
+  `new ApiError({ code, method, url, response, data })`. Five positional parameters, two of them
+  optional, is a call nobody can read.
+
+- **`message` describes the HTTP exchange.**
+
+  `HTTP_ERROR [PUT] https://api.example.com/tenants/me`. It used to be the server's sentence when the
+  body happened to carry a string `message`, which is a guess about one framework's error shape baked
+  into a generic library — and already wrong for a `string[]` message. ky and ofetch both build the
+  message from the exchange. The server's sentence is in `data`.
+
+- **The hooks return what was thrown.**
+
+  `useFetchFn<T, TError = ApiError>` and `useMutationFn<T, TVariables, TError = ApiError>`.
+
+  `normalizeToApiError` is deleted. `5.4.0` added it because the declared type `ApiError` was a lie
+  for anything `wireRaw` did not wrap, and it made the value match the declaration — at the cost of
+  destroying the original: a `ZodError` thrown inside `fetchFn` came out as
+  `new ApiError(message, "UNKNOWN_ERROR")`, class, stack and all context gone.
+
+  The declaration now matches the value instead. `TError` defaults to `ApiError` because that is what
+  `wireData` throws, and you name your own when `fetchFn` uses another transport. All three hooks
+  finally agree: `useFetch` already handed the `<ErrorBoundary>` whatever was thrown.
+
+- **`onError` is called for every `ApiError`, not only for a non-OK response.**
+
+  A dropped connection is the failure most worth sinking globally, and it was the one case the sink
+  never saw. Branch on `error.code`. Guard anything that assumed a response exists.
+
+- **Two entry points: `fetchwire` and `fetchwire/react`.**
+
+  `fetchwire` is the transport — `initWire`, `updateWireConfig`, `getWireConfig`, `wireData`,
+  `wireRaw`, `ApiError`. `fetchwire/react` is the cache and the hooks — `useFetch`, `useFetchFn`,
+  `useMutationFn`, `prefetch`, `fetchClient`.
+
+  The two layers never shared anything but a Promise: the hooks take `() => Promise<T>` and never
+  call `wireData`, and `wireData` has no idea a hook exists. One entry point stated that in prose and
+  contradicted it in `package.json`, where `react` was a required peer for a `wireData`-only consumer.
+
+  `react` is now an optional peer dependency, which is only honest because the split is structural:
+  nothing in the `fetchwire` entry point's import graph reaches React. Same package, same
+  `npm install fetchwire`.
+
+  `fetchwire/react` imports the transport with `import type` only, so no transport code is duplicated
+  into the React bundle — tsup code-splits ESM and not CJS, and a second copy of `api-error.js` would
+  mean a second `ApiError` class and a broken `instanceof` for CJS consumers.
+
+### Changed
+
+- **Tag arrays are serialized with `JSON.stringify`.** `tags.join(",")` produced the dependency key,
+  so a tag containing a comma silently split into two, and an empty tag list produced `[""]`. The
+  documented "tag strings must not contain commas" constraint is gone.
+
+- **A non-JSON error body is kept as text.** `data` holds the raw string — a proxy's HTML `502` page
+  is now readable instead of discarded.
+
+- **`sideEffects: false`** is declared, so bundlers can drop what you do not import.
+
+### Documentation
+
+- README: the `ApiError` section replaces "Synthetic error codes", and a section on reading your
+  API's own error codes out of `data`.
+- MIGRATION: a `6.x → 7.0.0` section, eleven items, three of them silent.
+
 ## [6.0.1] - 2026-08-28
 
 No breaking changes — every call signature is unchanged.

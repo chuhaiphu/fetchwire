@@ -16,7 +16,7 @@ subscribed to those tags re-reads.
 >
 > ```
 > try   { result = await fn(variables) }     → the mutation ITSELF
-> catch { normalizeToApiError → setState → onError }  → the mutation FAILED
+> catch { setState → onError }               → the mutation FAILED
 > ─────────────────────────────────────────────── the try ends HERE
 > setState → invalidateTags → onSuccess       → the CONSEQUENCES of success
 > ```
@@ -39,7 +39,7 @@ flowchart LR
     EXE --> PEND["PENDING<br/>setState(isMutating: true)<br/>requestId = ++latestRequestIdRef.current"]
     PEND --> TRY{"await fn(variables)<br/>the ONLY statement inside try"}
 
-    TRY -->|"rejected"| ERRS["apiError = normalizeToApiError(error)<br/>setState { data: null, isMutating: false }<br/>onError(apiError) → return null"]
+    TRY -->|"rejected"| ERRS["setState { data: null, isMutating: false }<br/>onError(the rejection value) → return null"]
 
     TRY -->|"fulfilled"| OKS["setState { data, isMutating: false }"]
     OKS --> INV["invalidateTags(tags)"]
@@ -94,7 +94,7 @@ sequenceDiagram
         Note over H,FC: this setState — and ONLY this setState — is inside<br/>`if (requestId === latestRequestIdRef.current)`
 
         opt invalidatesTags provided
-            H->>FC: invalidateTags(invalidatesTagsKey.split(','))
+            H->>FC: invalidateTags(JSON.parse(invalidatesTagsKey))
             loop each non-empty tag
                 Note over FC,Cache: JOB 1 — cache level, serves readers that are NOT mounted
                 FC->>Cache: delete(fetchKey) for every key mapped to the tag
@@ -147,10 +147,10 @@ sequenceDiagram
     alt non-OK response — an exchange completed
         Fn->>API: request
         API-->>Fn: 4xx / 5xx
-        Fn-->>H: wireRaw throws ApiError (statusCode from the response)
+        Fn-->>H: wireRaw throws ApiError — code 'HTTP_ERROR', status from the response, data = the error body
     else no exchange at all
         Fn->>API: request never completes (DNS, TLS, refused, timeout, abort)
-        Fn-->>H: wireRaw throws ApiError — errorCode 'NETWORK_ERROR', statusCode 520
+        Fn-->>H: wireRaw throws ApiError — code 'NETWORK_ERROR', status undefined
     else thrown from somewhere wireRaw does not wrap
         Note over Fn,H: a rejected getToken(), an onRequest / onResponse / transformResponse<br/>interceptor, an uninitialized wire
         Fn-->>H: the raw thrown value
@@ -158,10 +158,9 @@ sequenceDiagram
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,API: SETTLED — the failure branch. No tag is invalidated and onSuccess never runs.
-        H->>H: apiError = normalizeToApiError(error) — pass an ApiError through untouched, otherwise wrap it
         H->>H: setState(data: null, isMutating: false)
         Note over H,API: this setState — and ONLY this setState — is inside<br/>`if (requestId === latestRequestIdRef.current)`
-        H->>Cmp: await onError(apiError)
+        H->>Cmp: await onError(the rejection value)
         H-->>Cmp: return null — the only way this hook reports failure to an awaiting caller
     end
 ```
