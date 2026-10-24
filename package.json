@@ -2,43 +2,18 @@
   "name": "fetchwire",
   "type": "module",
   "version": "7.0.0",
-  "description": "A lightweight, focused API fetching library for React 19+ applications.",
+  "description": "fetchwire is a thin HTTP client built on top of browser native fetch API. It centralizes request configuration, error handling and a Promise cache.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chuhaiphu/fetchwire.git"
   },
-  "publishConfig": {
-    "provenance": true
-  },
   "exports": {
-    ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
-    },
-    "./react": {
-      "import": {
-        "types": "./dist/react.d.ts",
-        "default": "./dist/react.js"
-      },
-      "require": {
-        "types": "./dist/react.d.cts",
-        "default": "./dist/react.cjs"
-      }
-    },
-    "./package.json": "./package.json"
+    ".": "./dist/index.js",
+    "./react": "./dist/react/index.js"
   },
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "rm -rf dist && tsc",
+    "dev": "tsc --watch",
     "lint": "eslint src/"
   },
   "files": [
@@ -58,12 +33,8 @@
     "@eslint/js": "^9.39.4",
     "@types/react": "^19.2.14",
     "eslint": "^9.39.4",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "globals": "^17.4.0",
-    "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
+    "typescript": "~6.0.3",
     "typescript-eslint": "^8.58.0"
   },
   "funding": [

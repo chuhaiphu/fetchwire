@@ -12,7 +12,7 @@ subscribed to those tags re-reads.
 > reads never reference each other directly — they are wired only through shared tag strings.
 
 > Everything below turns on where the `try` **ends** inside `executeMutationFn`
-> ([use-mutation-fn.ts](../../src/hook/use-mutation-fn.ts)):
+> ([use-mutation-fn.ts](../../src/react/use-mutation-fn.ts)):
 >
 > ```
 > try   { result = await fn(variables) }     → the mutation ITSELF

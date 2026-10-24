@@ -1,8 +1,5 @@
 /**
- * A `Map`-backed store that caches in-flight Promises by string key.
- *
- * Reusing one Promise across renders is what stops `useFetch` from suspending forever: a fresh
- * Promise on every render would suspend, discard the render, and start again.
+ * A `Map`-backed store that caches Promises by string key, in flight or settled.
  */
 class PromiseCacheStore {
   private cacheMap = new Map<string, Promise<unknown>>();

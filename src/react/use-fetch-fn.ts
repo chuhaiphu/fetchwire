@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { fetchClient } from '../cache/fetch-client';
-import { eventEmitter } from '../cache/event-emitter';
-import { promiseCacheStore } from '../cache/promise-cache-store';
-import type { ApiError } from '../core/api-error';
-import { FetchOptions } from '../interface/react';
+
+import type { FetchOptions } from '../interfaces/core-interfaces.js';
+import type { ApiError } from '../utils/class/api-error.js';
+import { eventEmitter } from '../utils/class/event-emitter.js';
+import { fetchClient } from '../utils/class/fetch-client.js';
+import { promiseCacheStore } from '../utils/class/promise-cache-store.js';
 
 interface FetchState<T, TError> {
   data: T | null;
@@ -15,9 +16,9 @@ interface FetchState<T, TError> {
 /**
  * A hook that runs a fetch on demand and tracks its loading, refreshing, and error state.
  *
- * @template T Type of the value `fetchFn` resolves.
- * @template TError Type of the value `fetchFn` rejects with. Defaults to `ApiError`, what
- *   `wireData` / `wireRaw` throw; set it yourself when `fetchFn` uses another transport.
+ * @template T - Type of the value `fetchFn` resolves.
+ * @template TError - Type of the value `fetchFn` rejects with. Defaults to `ApiError`, what
+ *   `wireData` / `wireRaw` throw. Set it yourself when `fetchFn` uses another transport.
  * @param fetchFn - A Promise-returning function `() => Promise<T>`.
  *   fetchwire does not call it on mount. It runs only when you call `executeFetchFn()`
  *   (initial fetch) or `refreshFetchFn()` (refresh).
@@ -29,10 +30,10 @@ interface FetchState<T, TError> {
  *     When a `useMutationFn` invalidates a matching tag via `invalidatesTags`, the hook refreshes.
  *
  * @returns
- *   - `data` — the resolved value of type `T`, or null if not yet fetched.
- *   - `isLoading` — true while the initial fetch is in flight.
- *   - `isRefreshing` — true while a refresh is in flight.
- *   - `error` — whatever the last failed run rejected with, untouched, otherwise null.
+ *   - `data` — the resolved value of type `T`, or `null` if not yet fetched or the last run failed.
+ *   - `isLoading` — `true` while the initial fetch is in flight.
+ *   - `isRefreshing` — `true` while a refresh is in flight.
+ *   - `error` — whatever the last failed run rejected with, untouched, otherwise `null`.
  *   - `executeFetchFn` — manually triggers the initial fetch.
  *   - `refreshFetchFn` — manually triggers a refresh: skips the cache read and
  *     overwrites the cached Promise with the new one.

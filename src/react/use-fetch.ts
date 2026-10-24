@@ -1,8 +1,9 @@
 import { useEffect, useCallback, use, useRef, useState, useTransition } from 'react';
-import { fetchClient } from '../cache/fetch-client';
-import { eventEmitter } from '../cache/event-emitter';
-import { promiseCacheStore } from '../cache/promise-cache-store';
-import { FetchOptions } from '../interface/react';
+
+import type { FetchOptions } from '../interfaces/core-interfaces.js';
+import { eventEmitter } from '../utils/class/event-emitter.js';
+import { fetchClient } from '../utils/class/fetch-client.js';
+import { promiseCacheStore } from '../utils/class/promise-cache-store.js';
 
 /**
  * A hook that fetches immediately on mount and suspends the component while data is loading.
@@ -41,7 +42,7 @@ import { FetchOptions } from '../interface/react';
  *     an error the component is unmounted, so `refreshFetch` is inaccessible. Call
  *     `fetchClient.remove(fetchKey)` inside the boundary's reset handler instead, which clears
  *     the rejected Promise so the next mount starts a fresh fetch.
- *   - `isRefreshing` — true while a refresh is in flight.
+ *   - `isRefreshing` — `true` while a refresh is in flight.
  */
 export function useFetch<T>(
   fetch: () => Promise<T>,

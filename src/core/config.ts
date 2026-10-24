@@ -1,5 +1,5 @@
-import { WireConfig } from '../interface/wire';
-import { mergeHeaders } from '../util/merge-headers';
+import type { WireConfig } from '../interfaces/core-interfaces.js';
+import { generateMergedHeaders } from '../utils/generator/generate-merged-headers.js';
 
 let globalWireConfig: WireConfig | null = null;
 
@@ -12,16 +12,15 @@ let globalWireConfig: WireConfig | null = null;
 export const initWire = (config: WireConfig): void => {
   globalWireConfig = {
     ...config,
-    headers: mergeHeaders(config.headers),
+    headers: generateMergedHeaders(config.headers),
   };
 };
 
 /**
- * Updates the existing configuration. `headers` and `interceptors` are each merged one level
- * deep; every other field is replaced outright.
+ * Updates the existing configuration.
  *
  * @param config - A partial configuration object to update.
- * @throws Error if called before `initWire`.
+ * @throws {Error} if called before `initWire`.
  */
 export const updateWireConfig = (config: Partial<WireConfig>): void => {
   if (!globalWireConfig) {
@@ -31,7 +30,7 @@ export const updateWireConfig = (config: Partial<WireConfig>): void => {
   globalWireConfig = {
     ...globalWireConfig,
     ...config,
-    headers: mergeHeaders(globalWireConfig.headers, config.headers),
+    headers: generateMergedHeaders(globalWireConfig.headers, config.headers),
     interceptors: {
       ...globalWireConfig.interceptors,
       ...config.interceptors,
@@ -42,8 +41,8 @@ export const updateWireConfig = (config: Partial<WireConfig>): void => {
 /**
  * Retrieves the current global configuration state.
  *
- * @throws Error if called before `initWire`.
  * @returns The current `WireConfig`.
+ * @throws {Error} if called before `initWire`.
  */
 export const getWireConfig = (): WireConfig => {
   if (!globalWireConfig) {

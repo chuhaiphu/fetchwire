@@ -1,6 +1,6 @@
-import { FetchOptions } from '../interface/react';
-import { fetchClient } from './fetch-client';
-import { promiseCacheStore } from './promise-cache-store';
+import type { FetchOptions } from '../interfaces/core-interfaces.js';
+import { fetchClient } from '../utils/class/fetch-client.js';
+import { promiseCacheStore } from '../utils/class/promise-cache-store.js';
 
 /**
  * Eagerly runs `fetchFn` and caches its Promise under `options.fetchKey`, so a later

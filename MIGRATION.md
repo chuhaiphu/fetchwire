@@ -1,45 +1,108 @@
 # Migration guide
 
-What to change when upgrading. For **why** each change was made, see the [CHANGELOG](./CHANGELOG.md).
+Upgrade steps for every release with breaking changes, newest first. [CHANGELOG.md](./CHANGELOG.md)
+lists every release.
 
----
+The 6.0.0, 7.0.0 and 8.0.0 sections start with a table of the changes. Fix by hand the rows the
+compiler misses; the `grep` commands under each table find them.
 
-# 6.x → 7.0.0
+## 7.x → 8.0.0
 
-fetchwire 7 stops shaping your errors and splits the package in two. `ApiError` now carries the
-server's error body verbatim, so `transformError` has nothing left to do and is gone.
+fetchwire 8 ships ES modules only and moves the cache to `fetchwire`.
 
-| # | If you have | Change it to | Compiler catches it? |
+| # | If you have | Change it to | Caught by the compiler |
 | --- | --- | --- | --- |
-| 1 | `import { useFetch, useMutationFn, prefetch, fetchClient } from "fetchwire"` | import them from `"fetchwire/react"` | ✅ `TS2305` |
-| 2 | `transformError` in `initWire` | delete it; read `error.data` at the catch site | ✅ `TS2353` |
-| 3 | `new ApiError(message, errorCode, statusCode)` | `new ApiError({ code, method, url, response, data })` | ✅ `TS2554` |
-| 4 | `error.errorCode` for **your API's** code | `readErrorBody(error).error` | ✅ `TS2339` |
-| 5 | `error.errorCode` for **fetchwire's** code | `error.code` | ✅ `TS2339` |
-| 6 | `error.statusCode` | `error.status` | ✅ `TS2339` |
-| 7 | `error.message` showing the server's text | `readErrorBody(error).message` | ❌ **silent** |
-| 8 | `statusCode === 520` for a network failure | `error.code === "NETWORK_ERROR"` | ❌ **silent** |
-| 9 | `"EMPTY_BODY"` / `"INVALID_JSON"` | both are `"PARSE_ERROR"` | ✅ `TS2367` |
-| 10 | An `onError` interceptor assuming a response exists | it now fires for `NETWORK_ERROR` too, where `status` is `undefined` | ❌ **silent** |
-| 11 | A subclass of `ApiError` built to carry an extra field | delete it — the field is already on `error.data` | ⚠️ depends |
-
-Do **7, 8 and 10** by hand — nothing fails to compile. The rest the compiler will find for you.
-
-## Finding every site
+| 1 | `prefetch` or `fetchClient` imported from `"fetchwire/react"` | import it from `"fetchwire"` | Yes, `TS2305` |
+| 2 | `FetchOptions` imported from `"fetchwire/react"` | import it from `"fetchwire"` | Yes, `TS2305` |
+| 3 | `require("fetchwire")` on Node.js below 20.19 or 22.12 | Node.js 20.19+ or 22.12+, or `await import("fetchwire")` | No, `ERR_REQUIRE_ESM` at runtime |
+| 4 | Jest in CommonJS mode | let Jest transform fetchwire | No, the test suite fails to run |
+| 5 | Metro with package exports turned off | turn them on | No, the bundle fails to build |
+| 6 | A CommonJS TypeScript file with `module` set to `node16` or `node18` | `node20` or `nodenext` | Yes, `TS1479` |
+| 7 | `moduleResolution` set to `node10` or `node` | `bundler`, `node16` or `nodenext` | Yes, `TS2307` |
+| 8 | TypeScript below 5.0 | TypeScript 5.0+, or `skipLibCheck: true` | Yes, `TS1383` |
+| 9 | An import of `fetchwire/package.json` | remove it | No, `ERR_PACKAGE_PATH_NOT_EXPORTED` at runtime |
 
 ```bash
-grep -rnE "from ['\"]fetchwire['\"]" src/            # 1
-grep -rn "transformError" src/                       # 2, 3
-grep -rn "errorCode" src/                            # 4, 5
-grep -rn "statusCode" src/                           # 6, 8
+grep -rnE "require\(['\"]fetchwire" src/                 # 3
+grep -rn "transformIgnorePatterns" jest.config.*          # 4
+grep -rn "unstable_enablePackageExports" metro.config.*   # 5
+grep -rn "fetchwire/package.json" src/                    # 9
+```
+
+### 1–2. Import `prefetch`, `fetchClient` and `FetchOptions` from `fetchwire`
+
+`TS2305: Module '"fetchwire/react"' has no exported member 'prefetch'.`
+
+```diff
+- import { useFetch, prefetch, fetchClient } from "fetchwire/react";
++ import { prefetch, fetchClient } from "fetchwire";
++ import { useFetch } from "fetchwire/react";
+```
+
+`fetchwire/react` keeps `useFetch`, `useFetchFn`, `useMutationFn`, `MutationOptions` and
+`ExecuteMutationOptions`.
+
+### 3. Load fetchwire with `require()`
+
+Node.js loads an ES module with `require()` from 20.19.0 and 22.12.0. On an older version, upgrade
+Node.js or load fetchwire with `await import("fetchwire")`.
+
+### 4. Run fetchwire in Jest
+
+In CommonJS mode, add fetchwire to the files Jest transforms:
+
+```js
+transformIgnorePatterns: ["/node_modules/(?!fetchwire/)"],
+```
+
+Or run Jest 30.5+ on Node.js 24.9+ with `--experimental-vm-modules`.
+
+### 5. Turn on package exports in Metro
+
+fetchwire 8 resolves only through `exports`. Metro reads `exports` by default from Metro 0.82
+(React Native 0.79). If `metro.config.js` sets `resolver.unstable_enablePackageExports` to `false`,
+set it to `true`.
+
+### 6–8. Update TypeScript settings
+
+- A CommonJS file, meaning a `.cts` file or a `.ts` file in a package without `"type": "module"`,
+  needs `module` set to `node20` or `nodenext` to import fetchwire.
+- `moduleResolution` `node10` ignores `exports`. Use `bundler` with a bundler, and `node16` or
+  `nodenext` otherwise.
+- TypeScript below 5.0 reports `TS1383` in fetchwire's declarations. Upgrade, or set
+  `skipLibCheck: true`.
+
+### 9. Remove imports of `fetchwire/package.json`
+
+8.0.0 removes `"./package.json"` from `exports`.
+
+## 6.x → 7.0.0
+
+fetchwire 7 keeps the server's error body on `ApiError`, removes `transformError`, and moves the
+hooks and the cache to `fetchwire/react`.
+
+| # | If you have | Change it to | Caught by the compiler |
+| --- | --- | --- | --- |
+| 1 | `useFetch`, `useFetchFn`, `useMutationFn`, `prefetch` or `fetchClient` imported from `"fetchwire"` | import it from `"fetchwire/react"` | Yes, `TS2305` |
+| 2 | `transformError` in `initWire` | delete it; read `error.data` where you handle the error | Yes, `TS2353` |
+| 3 | `new ApiError(message, errorCode, statusCode)` | `new ApiError({ code, method, url, response, data })` | Yes, `TS2554` |
+| 4 | `error.errorCode` for your API's code | `readErrorBody(error).error` | Yes, `TS2339` |
+| 5 | `error.errorCode` for fetchwire's code | `error.code` | Yes, `TS2339` |
+| 6 | `error.statusCode` | `error.status` | Yes, `TS2339` |
+| 7 | `error.message` shown to the user | `readErrorBody(error).message` | No |
+| 8 | `statusCode === 520` for a network failure | `error.code === "NETWORK_ERROR"` | No |
+| 9 | `"EMPTY_BODY"` or `"INVALID_JSON"` | `"PARSE_ERROR"` | Yes, `TS2367` |
+| 10 | An `onError` that assumes a response exists | handle `NETWORK_ERROR`, where `status` is `undefined` | No |
+| 11 | A subclass of `ApiError` that carries a body field | delete it; read the field from `error.data` | Depends |
+
+```bash
 grep -rn "error.message" src/                        # 7
 grep -rn "520" src/                                  # 8
-grep -rnE "EMPTY_BODY|INVALID_JSON" src/             # 9
 grep -rn "onError" src/                              # 10
 grep -rn "extends ApiError" src/                     # 11
 ```
 
-## 1. Hooks move to `fetchwire/react`
+### 1. Import the hooks and the cache from `fetchwire/react`
 
 `TS2305: Module '"fetchwire"' has no exported member 'useFetch'.`
 
@@ -49,22 +112,13 @@ grep -rn "extends ApiError" src/                     # 11
 + import { useFetch, fetchClient } from "fetchwire/react";
 ```
 
-`fetchwire` is the transport — `initWire`, `updateWireConfig`, `getWireConfig`, `wireData`,
-`wireRaw`, `ApiError`. `fetchwire/react` is the cache and the hooks — `useFetch`, `useFetchFn`,
-`useMutationFn`, `prefetch`, `fetchClient`.
+`react` is an optional peer dependency from 7.0.0: code that imports only `fetchwire` runs without
+React installed.
 
-There is still one package and one `npm install fetchwire`. What changed is that the transport
-entry point imports no React, so `react` is now an **optional** peer dependency: a Node script or
-a server action can use `wireData` without React installed. Nothing to do if you already have
-React — npm keeps installing it.
-
-## 2. `transformError` removed
+### 2. Delete `transformError`
 
 `TS2353: Object literal may only specify known properties, and 'transformError' does not exist in
 type 'WireConfig'.`
-
-The error body now reaches you untouched on `error.data`, so there is nothing to normalize up
-front. Delete the option and read the body where you handle the error.
 
 ```diff
   initWire({
@@ -78,7 +132,7 @@ front. Delete the option and read the body where you handle the error.
   });
 ```
 
-Write one reader in your app instead:
+Read the error body where you handle the error. Steps 4, 7 and 11 use this helper:
 
 ```ts
 // src/utils/read-error-body.ts
@@ -95,7 +149,7 @@ export function readErrorBody(error: unknown): ErrorBody {
 }
 ```
 
-## 3. `ApiError`'s constructor takes one object
+### 3. Pass one object to `new ApiError`
 
 `TS2554: Expected 1 arguments, but got 3.`
 
@@ -110,30 +164,27 @@ export function readErrorBody(error: unknown): ErrorBody {
 + });
 ```
 
-You only need this when you construct an `ApiError` yourself — typically a hand-rolled upload that
-uses a transport other than `fetch`.
+Only code that constructs an `ApiError` itself needs this step.
 
-## 4-5. `errorCode` splits in two
+### 4–5. Replace `errorCode`
 
 `TS2339: Property 'errorCode' does not exist on type 'ApiError'.`
 
-One field used to hold two unrelated things: your server's code (`"TENANT_INACTIVE"`) and
-fetchwire's own (`"INVALID_JSON"`). They now live apart.
+Your API's code is in the error body:
 
 ```diff
 - if (error.errorCode === "TENANT_INACTIVE") showTenantDialog();
 + if (readErrorBody(error).error === "TENANT_INACTIVE") showTenantDialog();
 ```
 
+fetchwire's code is on `error.code`, which is `"HTTP_ERROR"`, `"NETWORK_ERROR"` or `"PARSE_ERROR"`:
+
 ```diff
 - if (error.errorCode === "NETWORK_ERROR") showOfflineToast();
 + if (error.code === "NETWORK_ERROR") showOfflineToast();
 ```
 
-`error.code` is a closed union of `"HTTP_ERROR" | "NETWORK_ERROR" | "PARSE_ERROR"`, so a `switch`
-over it is exhaustive.
-
-## 6. `statusCode` → `status`
+### 6. Replace `statusCode` with `status`
 
 `TS2339: Property 'statusCode' does not exist on type 'ApiError'.`
 
@@ -142,14 +193,10 @@ over it is exhaustive.
 + if (error.status === 401) redirectToLogin();
 ```
 
-`status` is a getter over `error.response`, so it can never disagree with the transport.
+### 7. Read the server's message from the error body
 
-## 7. `message` describes the HTTP exchange
-
-**No compile error.** `error.message` used to be the server's sentence when the body carried a
-string `message`. It is now built from the exchange, e.g.
-`HTTP_ERROR [PUT] https://api.example.com/tenants/me` — useful in a log or a stack trace, and
-wrong on a screen.
+`error.message` describes the request, e.g. `HTTP_ERROR [PUT] https://api.example.com/tenants/me`.
+Show the server's text from the body:
 
 ```diff
 - Alert.alert("Failed", error.message);
@@ -157,37 +204,33 @@ wrong on a screen.
 + Alert.alert("Failed", Array.isArray(message) ? message[0] : message ?? "Something went wrong");
 ```
 
-If your app already keys its own copy off an error code, this changes nothing for you.
+Skip this step if your app maps error codes to its own text.
 
-## 8. Network failures have no status
+### 8. Detect a network failure by `code`
 
-**No compile error.** A failed connection used to report `statusCode: 520`, a status no server
-ever sent. It now reports `status: undefined`, and says what happened through `code`.
+A network failure has `status: undefined`.
 
 ```diff
 - if (error.statusCode === 520) showOfflineToast();
 + if (error.code === "NETWORK_ERROR") showOfflineToast();
 ```
 
-## 9. `EMPTY_BODY` and `INVALID_JSON` merge into `PARSE_ERROR`
+### 9. Replace `EMPTY_BODY` and `INVALID_JSON` with `PARSE_ERROR`
 
 `TS2367: This comparison appears to be unintentional.`
-
-Both meant the same thing: an OK response whose body could not be read as JSON. `JSON.parse("")`
-throws on its own, so the empty body needs no case of its own.
 
 ```diff
 - if (error.errorCode === "EMPTY_BODY" || error.errorCode === "INVALID_JSON") reportBug();
 + if (error.code === "PARSE_ERROR") reportBug();
 ```
 
-The unparsable text is on `error.data`. If you relied on the `content-length` the old message
-carried, read it from `error.response.headers.get("content-length")`.
+The text that failed to parse is on `error.data`. The `content-length` header is on
+`error.response.headers.get("content-length")`.
 
-## 10. `onError` now sees every failure
+### 10. Handle `NETWORK_ERROR` in `onError`
 
-**No compile error.** It used to fire only for a non-OK response. It now fires for every `ApiError`
-fetchwire throws, which is what makes it a sink worth having: a dropped connection reaches it too.
+`onError` receives every `ApiError`. On a `NETWORK_ERROR`, `error.status` and `error.response` are
+`undefined`.
 
 ```diff
   onError: (error) => {
@@ -197,13 +240,9 @@ fetchwire throws, which is what makes it a sink worth having: a dropped connecti
   },
 ```
 
-Guard anything that assumed a response existed — on a `NETWORK_ERROR`, `error.status` and
-`error.response` are both `undefined`.
+### 11. Delete `ApiError` subclasses that carry a body field
 
-## 11. Subclasses of `ApiError` are no longer needed
-
-Extending `ApiError` used to be the only way to carry a field it had no slot for. That field is
-already on `error.data`.
+The field is on `error.data`.
 
 ```diff
 - export class DetailedApiError extends ApiError {
@@ -221,49 +260,29 @@ already on `error.data`.
 + }
 ```
 
-## Tag strings may contain commas again
+## 5.x → 6.0.0
 
-Nothing to change, and one constraint to forget. Tag arrays are serialized with `JSON.stringify`
-rather than `join(",")`, so `"todo,list"` is one tag now.
+fetchwire 6 removes the `HttpResponse` envelope: a request resolves the payload.
 
----
-
-# 5.x → 6.0.0
-
-fetchwire 6 removes the `HttpResponse` envelope. A request now resolves the payload.
-
-| # | If you have | Change it to | Compiler catches it? |
+| # | If you have | Change it to | Caught by the compiler |
 | --- | --- | --- | --- |
-| 1 | `wireApi<T>(...)` | `wireData<T>(...)` | ✅ `TS2305` |
-| 2 | `HttpResponse<T>` in a type | `T`, or `{ data: T; response: Response }` | ✅ `TS2305` |
-| 3 | `transformResponse` returning `{ data, message, status }` | return the payload only | ❌ **silent** |
-| 4 | A `204` / `205` / `HEAD` call | resolves `undefined`, not an object | ❌ **silent** |
-| 5 | `executeMutationFn({ onSuccess })` | `executeMutationFn(undefined, { onSuccess })` | ✅ `TS2345` |
-| 6 | `(await executeMutationFn(...)).data` | the return value **is** the payload | ✅ `TS2339` |
-| 7 | `getWireConfig().transformResponse(json)` by hand | it returns the payload now | ⚠️ depends |
-| 8 | `EMPTY_DATA` error code | removed — nothing throws it | ❌ **silent** |
-
-Do **3, 4 and 8** by hand — nothing fails to compile. The rest the compiler will find for you.
-
-## Finding every site
+| 1 | `wireApi<T>(...)` | `wireData<T>(...)` | Yes, `TS2305` |
+| 2 | `HttpResponse<T>` in a type | `T`, or `{ data: T; response: Response }` | Yes, `TS2305` |
+| 3 | `transformResponse` returning `{ data, message, status }` | return the payload | No |
+| 4 | A `204`, `205` or `HEAD` call | it resolves `undefined` | No |
+| 5 | `executeMutationFn({ onSuccess })` | `executeMutationFn(undefined, { onSuccess })` | Yes, `TS2345` |
+| 6 | `(await executeMutationFn(...)).data` | the return value is the payload | Yes, `TS2339` |
+| 7 | `getWireConfig().transformResponse(json)` called by hand | it returns the payload | Depends |
+| 8 | The `EMPTY_DATA` error code | delete it | No |
 
 ```bash
-grep -rn "wireApi" src/                              # 1
-grep -rn "HttpResponse" src/                         # 2
 grep -rn "transformResponse" src/                    # 3, 7
 grep -rnE "wireApi<(void|null|undefined)>" src/      # 4
-grep -rn "method: *['\"]\(DELETE\|HEAD\)['\"]" src/  # 4
+grep -rnE "method: *['\"](DELETE|HEAD)['\"]" src/    # 4
 grep -rn "EMPTY_DATA" src/                           # 8
-
-# 5 — collect the names executeMutationFn was renamed to, then find those
-#     called with an object as the first argument
-grep -rhoE "executeMutationFn: *[a-zA-Z][a-zA-Z0-9]*" src/ \
-  | sed 's/.*: *//' | sort -u > /tmp/triggers.txt
-while read -r t; do grep -rn "\b${t}(\s*{" src/; done < /tmp/triggers.txt | sort -u
-grep -rn "executeMutationFn(\s*{" src/
 ```
 
-## 1. `wireApi` → `wireData`
+### 1. Rename `wireApi` to `wireData`
 
 `TS2305: Module '"fetchwire"' has no exported member 'wireApi'.`
 
@@ -277,9 +296,9 @@ grep -rn "executeMutationFn(\s*{" src/
   }
 ```
 
-Only the resolved value changes: `Promise<Todo[]>` instead of `Promise<HttpResponse<Todo[]>>`.
+`getTodosApi()` resolves `Todo[]`.
 
-## 2. `HttpResponse<T>` removed
+### 2. Remove `HttpResponse<T>`
 
 `TS2305: Module '"fetchwire"' has no exported member 'HttpResponse'.`
 
@@ -295,8 +314,7 @@ Only the resolved value changes: `Promise<Todo[]>` instead of `Promise<HttpRespo
   };
 ```
 
-If that call needs the status or headers, use `wireRaw` and spell the shape inline — there is no
-exported type name for it:
+To read the status or headers of a call, use `wireRaw` and write its type inline:
 
 ```ts
 async function createTodo(input: NewTodo): Promise<{ data: Todo; response: Response }> {
@@ -304,11 +322,10 @@ async function createTodo(input: NewTodo): Promise<{ data: Todo; response: Respo
 }
 ```
 
-## 3. `transformResponse` returns the payload
+### 3. Return the payload from `transformResponse`
 
-**No compile error.** The old return value still type-checks — `{ data, message, status }` is
-assignable to `unknown` — so every payload in your app silently becomes the envelope object.
-Fix this first.
+Do this step first. The old return value still compiles, and every payload becomes the envelope
+object.
 
 ```diff
   initWire({
@@ -322,7 +339,7 @@ Fix this first.
   });
 ```
 
-If you used it as a guard, keep throwing — only the return value changed:
+A `transformResponse` that throws on an unexpected body can keep throwing:
 
 ```ts
 transformResponse(json) {
@@ -334,10 +351,9 @@ transformResponse(json) {
 }
 ```
 
-## 4. Bodiless responses resolve `undefined`
+### 4. Handle `undefined` from bodiless responses
 
-**No compile error.** A `204`, `205` or `HEAD` used to resolve `{ data: undefined, status, message: "" }`
-— an object, always truthy. Now it resolves `undefined`, so a truthiness check flips.
+A `204`, `205` or `HEAD` response resolves `undefined`, so a truthiness check on the result fails.
 
 ```diff
 - return wireApi<void>(`/todos/${id}`, { method: "DELETE" });
@@ -346,14 +362,13 @@ transformResponse(json) {
 
 ```diff
   const result = await deleteTodoApi(id);
-- if (result) showSuccess();   // was always true
-+ showSuccess();               // a resolved Promise already means success
+- if (result) showSuccess();
++ showSuccess();
 ```
 
-Also: `transformResponse` is no longer called for these responses, and a `HEAD` request no longer
-throws `EMPTY_BODY`.
+`transformResponse` is skipped for these responses.
 
-## 5. `executeMutationFn` takes `variables` first
+### 5. Pass `variables` first to `executeMutationFn`
 
 `TS2345: Argument of type '{ onSuccess: ... }' is not assignable to parameter of type 'void'.`
 
@@ -364,18 +379,12 @@ throws `EMPTY_BODY`.
 + deleteTodo(undefined, { onSuccess: () => router.back() });
 ```
 
-With no callbacks, omit the argument entirely: `deleteTodo()`.
+With no callbacks, call `deleteTodo()`. A mutation with variables keeps its call:
+`toggleTodo("todo-123", { onSuccess })`.
 
-Mutations **with** variables are unchanged: `toggleTodo("todo-123", { onSuccess })`.
-
-Also drop any workaround for the old `mutationFn.length` constraint — default parameters, rest
-parameters and wrapped functions are all fine now.
-
-## 6. `executeMutationFn` returns the payload
+### 6. Read the payload from `executeMutationFn`
 
 `TS2339: Property 'data' does not exist on type '<your payload type>'.`
-
-The return value and `onSuccess` now carry the same thing: whatever `mutationFn` resolved.
 
 ```diff
 - const response = await signIn(credentials);
@@ -388,9 +397,7 @@ The return value and `onSuccess` now carry the same thing: whatever `mutationFn`
 + }
 ```
 
-`null` still means the mutation failed.
-
-If a mutation needs the status, have its `mutationFn` call `wireRaw`:
+`null` means the mutation failed. To read the status, call `wireRaw` in `mutationFn`:
 
 ```ts
 const { executeMutationFn: createTodo } = useMutationFn((input: NewTodo) =>
@@ -401,12 +408,9 @@ const result = await createTodo(input);
 result?.response.status; // 201
 ```
 
-The same applies to `useFetch`, `useFetchFn` and `prefetch` — they hand back exactly what the
-function resolved.
+### 7. Update code that calls `getWireConfig().transformResponse`
 
-## 7. If you call `getWireConfig().transformResponse` yourself
-
-Skip unless you have code that runs **outside** fetchwire's pipeline and reassembles it by hand.
+Skip this step unless your code calls `transformResponse` outside fetchwire.
 
 ```diff
 - return (
@@ -419,13 +423,10 @@ Skip unless you have code that runs **outside** fetchwire's pipeline and reassem
 + ) as UploadResult;
 ```
 
-Everything else on `getWireConfig()` is unchanged. If you build the request too, mirror these
-defaults: `Content-Type: application/json` for a **string** body only (never for `FormData`,
-`URLSearchParams`, `Blob`, or a bodyless request), and `Accept: application/json, */*;q=0.8`.
+If that code also builds the request, send `Content-Type: application/json` for a string body only,
+and `Accept: application/json, */*;q=0.8` on every request.
 
-## 8. `EMPTY_DATA` removed
-
-**No compile error** — just a branch that will never run.
+### 8. Delete `EMPTY_DATA`
 
 ```diff
   const ERROR_MESSAGES = {
@@ -436,114 +437,88 @@ defaults: `Content-Type: application/json` for a **string** body only (never for
   };
 ```
 
-The other four codes are unchanged: `NETWORK_ERROR`, `EMPTY_BODY`, `INVALID_JSON`, `HTTP_ERROR`.
+`NETWORK_ERROR`, `EMPTY_BODY`, `INVALID_JSON` and `HTTP_ERROR` stay.
 
-## Nothing to do for
+## 5.1.x → 5.2.0
 
-`initWire` · `updateWireConfig` · `getWireConfig` · `transformError` · `onRequest` / `onResponse` /
-`onError` · `ApiError` · `fetchClient` · `prefetch` arguments · tags, `fetchKey`, invalidation,
-deduplication · `skipToken` · header precedence · `useFetch` / `useFetchFn` options and refresh.
+1. If your API wraps responses in an envelope, add a `transformResponse`. fetchwire stops reading
+   `data`, `status`, `statusCode` and `message` off the body:
 
-`useFetch`'s `data` narrowed from `T | null` to `T`. Existing `data?.field` and `data ?? []` still
-compile — they are merely redundant now.
+   ```ts
+   initWire({
+     transformResponse: (json) => {
+       const body = json as { statusCode?: number; message?: string; data?: unknown };
+       return { data: body.data, status: body.statusCode, message: body.message };
+     },
+   });
+   ```
 
----
+2. If your error body uses `statusCode` for a code of your own, read it in `transformError`.
+   `ApiError.statusCode` is the HTTP status.
+3. If your `transformError` expects `message`, `error` or `statusCode` in the body, handle their
+   absence: it receives the body as sent.
+4. If your API sends `message` or `error` as an array or an object, add a `transformError`. Without
+   one, such a `message` becomes `HTTP <status>`, and such an `error` becomes `"HTTP_ERROR"`.
+5. If `transformResponse` checks for an empty body, delete the check. An empty body throws `ApiError`
+   with `errorCode: "EMPTY_BODY"`.
+6. If you match `NETWORK_ERROR` to catch a body that is not JSON, match `INVALID_JSON`.
+7. If you cast errors from interceptors or `transformResponse` to `ApiError`, narrow them with
+   `instanceof`. They propagate as thrown.
+8. Make `onSuccess` and `onError` safe to run after the component unmounts, for example by calling a
+   router or a store. They now run in that case.
 
-# 5.1.x → 5.2.0
+## 5.0.x → 5.1.0
 
-**If your API uses an envelope and you relied on the implicit unwrap, declare it.** The default path
-no longer reads `data` / `status` / `statusCode` / `message` off the body.
-
-```ts
-initWire({
-  transformResponse: (json) => {
-    const body = json as { statusCode?: number; message?: string; data?: unknown };
-    return { data: body.data, status: body.statusCode, message: body.message };
-  },
-});
-```
-
-Projects that already configure `transformResponse` are unaffected.
-
-**If your error body carries a domain code in `statusCode`, read it in `transformError`.**
-`ApiError.statusCode` is now always the HTTP status. No change if the two always match.
-
-**If your `transformError` assumed `message` / `error` / `statusCode` were always present, handle
-their absence.** It now receives the parsed body untouched. Without a `transformError`, a non-string
-`message` or `error` falls back to `HTTP <status>` / `"HTTP_ERROR"` — add one if your API sends those
-as arrays or objects.
-
-**If you detected empty responses inside `transformResponse`, delete that check.** An empty body on a
-status that should carry one now throws `ApiError` with `errorCode: "EMPTY_BODY"`.
-
-**If you matched on `NETWORK_ERROR` to catch malformed payloads, match `INVALID_JSON` instead.**
-
-**Narrow with `instanceof` instead of casting.** Errors thrown from your interceptors or
-`transformResponse` now propagate as themselves, not as `ApiError`.
-
-**Write `onSuccess` / `onError` to tolerate an unmounted component** — a router, a store or an alert
-rather than the caller's own `setState`. They now run in cases where they were silently skipped.
-
----
-
-# 5.0.x → 5.1.0
-
-Rename the call site — signature and behavior are unchanged:
+Rename the method:
 
 ```diff
 - fetchClient.setFetchKeyToTags(fetchKey, promise, tags);
 + fetchClient.cachePromiseAndRegisterTags(fetchKey, promise, tags);
 ```
 
-Most applications never call this directly.
+## 4.x → 5.0.0
 
----
+1. Move `onUnauthorized` and `onForbidden` into `onError`, and delete `unauthorizedStatusCodes` and
+   `forbiddenStatusCodes`:
 
-# 4.x → 5.0.0
+   ```diff
+     initWire({
+       interceptors: {
+   -     onUnauthorized: (error) => redirectToLogin(),
+   -     onForbidden: (error) => showNoPermission(),
+   -     onError: (error) => showToast(error.message),
+   +     onError: (error) => {
+   +       if (error.statusCode === 401) return redirectToLogin();
+   +       if (error.statusCode === 403) return showNoPermission();
+   +       showToast(error.message);
+   +     },
+       },
+     });
+   ```
 
-Fold `onUnauthorized` / `onForbidden` into `onError`, and drop `unauthorizedStatusCodes` /
-`forbiddenStatusCodes`:
+2. If you target an engine without ES2022 support, transpile `node_modules/fetchwire`.
 
-```diff
-  initWire({
-    interceptors: {
--     onUnauthorized: (error) => redirectToLogin(),
--     onForbidden: (error) => showNoPermission(),
--     onError: (error) => showToast(error.message),
-+     onError: (error) => {
-+       if (error.statusCode === 401) return redirectToLogin();
-+       if (error.statusCode === 403) return showNoPermission();
-+       showToast(error.message);
-+     },
-    },
-  });
-```
+## 3.3.1 → 4.0.0
 
----
+1. Swap the arguments of `prefetch` and move the key into `options`:
 
-# 3.3.1 → 4.0.0
+   ```diff
+   - prefetch("todos", () => getTodosApi());
+   + prefetch(() => getTodosApi(), { fetchKey: "todos" });
+   ```
 
-Swap `prefetch`'s arguments and move the key into `options`:
+2. Replace `promiseCacheStore` with `fetchClient`:
 
-```diff
-- prefetch("todos", () => getTodosApi());
-+ prefetch(() => getTodosApi(), { fetchKey: "todos" });
-```
+   ```diff
+   - import { promiseCacheStore } from "fetchwire";
+   - promiseCacheStore.clear();
+   + import { fetchClient } from "fetchwire";
+   + fetchClient.clear();
+   ```
 
-Replace `promiseCacheStore` — it is no longer exported:
+## 3.3.0 → 3.3.1
 
-```diff
-- import { promiseCacheStore } from "fetchwire";
-- promiseCacheStore.clear();
-+ import { fetchClient } from "fetchwire";
-+ fetchClient.clear();
-```
-
----
-
-# 3.3.0 → 3.3.1
-
-Move the `fetchKey` string into `options`, and add it to every `useFetchFn` call:
+Move `fetchKey` into `options`, and add it to every `useFetchFn` call:
 
 ```diff
 - useFetch(getTodosApi, "todos", { tags: ["todos"] });
@@ -553,26 +528,32 @@ Move the `fetchKey` string into `options`, and add it to every `useFetchFn` call
 + useFetchFn(getTodosApi, { fetchKey: "todos" });
 ```
 
-`options` and `fetchKey` are both required now. Choose a key that uniquely identifies the resource.
+Pick a key that identifies the resource uniquely.
 
----
+## 3.2.x → 3.3.0
 
-# 3.2.x → 3.3.0
+1. Add `url` as the first parameter of `onRequest`:
 
-Add `url` as the first parameter of `onRequest`:
+   ```diff
+   - onRequest: (requestInit) => {
+   + onRequest: (url, requestInit) => {
+       requestInit.headers.set("x-request-id", crypto.randomUUID());
+     },
+   ```
 
-```diff
-- onRequest: (requestInit) => {
-+ onRequest: (url, requestInit) => {
-    requestInit.headers.set("x-request-id", crypto.randomUUID());
-  },
-```
+2. `onError` also runs for `401` and `403`, after `onUnauthorized` or `onForbidden`. If your
+   `onError` handles other errors only, skip those two statuses:
 
----
+   ```ts
+   onError: (error) => {
+     if (error.statusCode === 401 || error.statusCode === 403) return;
+     showToast(error.message);
+   };
+   ```
 
-# 3.1 → 3.2.0
+## 3.1.0 → 3.2.0
 
-`executeFetchFn` / `refreshFetchFn` resolve the data instead of the envelope:
+`executeFetchFn` and `refreshFetchFn` resolve the data:
 
 ```diff
 - const response = await executeFetchFn();
@@ -580,17 +561,24 @@ Add `url` as the first parameter of `onRequest`:
 + const todos = await executeFetchFn();
 ```
 
----
+## 1.x → 2.0.0
 
-# 1.x → 2.0.0
-
-Pass the helper to the hook instead of to the trigger:
+Pass the request function to the hook, and call the trigger with no function:
 
 ```diff
-- const { executeFetchFn } = useFetchFn();
-- executeFetchFn(getTodosApi);
-+ const { executeFetchFn } = useFetchFn(getTodosApi, { fetchKey: "todos" });
+- const { executeFetchFn } = useFetchFn<Todo[]>({ tags: ["todos"] });
+- executeFetchFn(() => getTodosApi());
++ const { executeFetchFn } = useFetchFn(getTodosApi, { tags: ["todos"] });
 + executeFetchFn();
 ```
 
-Same shape for `useMutationFn`. Types are inferred from the helper's return type.
+```diff
+- const { executeMutationFn } = useMutationFn<Todo>({ invalidatesTags: ["todos"] });
+- executeMutationFn(() => createTodoApi({ title }), { onSuccess });
++ const { executeMutationFn } = useMutationFn(() => createTodoApi({ title }), {
++   invalidatesTags: ["todos"],
++ });
++ executeMutationFn({ onSuccess });
+```
+
+The data type is inferred from the function's return type.

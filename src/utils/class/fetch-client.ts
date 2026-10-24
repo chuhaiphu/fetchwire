@@ -1,5 +1,5 @@
-import { promiseCacheStore } from './promise-cache-store';
-import { eventEmitter } from './event-emitter';
+import { eventEmitter } from './event-emitter.js';
+import { promiseCacheStore } from './promise-cache-store.js';
 
 class FetchClient {
   private tagToFetchKeysMap = new Map<string, Set<string>>();
@@ -8,7 +8,7 @@ class FetchClient {
    * Registers the tag-to-`fetchKey` links without touching the cached Promise.
    *
    * @param fetchKey - The key under which this request's Promise is cached.
-   * @param tags - Tags to associate with this fetch key.
+   * @param tags - Tags to associate with this `fetchKey`.
    */
   registerTags(fetchKey: string, tags?: string[]) {
     if (!tags) return;
@@ -33,7 +33,7 @@ class FetchClient {
    *
    * @param fetchKey - The key under which this request's Promise is cached.
    * @param promise - The Promise to cache.
-   * @param tags - Tags to associate with this fetch key, used for invalidation.
+   * @param tags - Tags to associate with this `fetchKey`, used for invalidation.
    */
   cachePromiseAndRegisterTags(fetchKey: string, promise: Promise<unknown>, tags?: string[]) {
     void promise.catch(() => {});
@@ -43,7 +43,7 @@ class FetchClient {
   }
 
   /**
-   * Clears every cached Promise whose fetch key is associated with those tags, then emits an
+   * Clears every cached Promise whose `fetchKey` is associated with those tags, then emits an
    * event per tag so mounted hooks refresh.
    *
    * @param tags - The tags to invalidate.
@@ -72,7 +72,7 @@ class FetchClient {
   }
 
   /**
-   * Clears every cached Promise and the whole tag-to-fetchKey map.
+   * Clears every cached Promise and the whole tag-to-`fetchKey` map.
    */
   clear() {
     promiseCacheStore.clear();

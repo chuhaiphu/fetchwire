@@ -1,25 +1,25 @@
-import { WireRequestInit } from '../interface/wire';
-import { mergeHeaders } from '../util/merge-headers';
-import { ApiError } from './api-error';
-import { getWireConfig } from './config';
+import type { WireRequestInit } from '../interfaces/core-interfaces.js';
+import { ApiError } from '../utils/class/api-error.js';
+import { generateMergedHeaders } from '../utils/generator/generate-merged-headers.js';
+import { getWireConfig } from './config.js';
 
 /**
  * Sends an API request and returns the payload together with the `Response` that carried it.
  *
- * @param endpoint - The API endpoint to call. Example: '/api/v1/users'.
+ * @param endpoint - The API endpoint to call, e.g. `'/api/v1/users'`.
  * @param options - The request options: a `RequestInit` plus optional fetchwire flags
  *   (e.g. `skipToken` to send the request without an `Authorization` header).
- * @returns `data` — the payload, as produced by `transformResponse`, or the parsed body when
- *   no transform is configured. `undefined` for a `204`, a `205` or any `HEAD`.
- *
- *   `response` — the `Response` `fetch` returned, with its body already consumed.
+ * @returns
+ *   - `data` — the payload, as produced by `transformResponse`, or the parsed body when
+ *     no transform is configured. `undefined` for a `204`, a `205` or any `HEAD`.
+ *   - `response` — the `Response` `fetch` returned, with its body already consumed.
  *
  * @throws {ApiError} with `code`:
- *   - `"NETWORK_ERROR"` — `fetch()` itself rejected; no HTTP exchange happened, so `status` is
+ *   - `'NETWORK_ERROR'` — `fetch()` itself rejected. No HTTP exchange happened, so `status` is
  *     `undefined`.
- *   - `"HTTP_ERROR"` — the server answered with a non-OK status. `data` holds the error body:
+ *   - `'HTTP_ERROR'` — the server answered with a non-OK status. `data` holds the error body:
  *     the parsed JSON, the raw text when it is not JSON, or `undefined` when there was none.
- *   - `"PARSE_ERROR"` — an OK response whose body is not JSON, the empty body included. `data`
+ *   - `'PARSE_ERROR'` — an OK response whose body is not JSON, the empty body included. `data`
  *     holds the raw text.
  *
  * Errors thrown by `onRequest`, `onResponse` or `transformResponse` propagate as themselves.
@@ -34,7 +34,7 @@ export async function wireRaw<T>(
   const method = requestInit.method?.toUpperCase() ?? 'GET';
   const accessToken = skipToken ? null : await config.getToken();
 
-  const headers = mergeHeaders(
+  const headers = generateMergedHeaders(
     config.headers,
     accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
     requestInit.headers,
@@ -120,13 +120,13 @@ export async function wireRaw<T>(
 /**
  * Sends an API request and returns the payload, dropping the `Response` that `wireRaw` keeps.
  *
- * @param endpoint - The API endpoint to call. Example: '/api/v1/users'.
+ * @param endpoint - The API endpoint to call, e.g. `'/api/v1/users'`.
  * @param options - The request options: a `RequestInit` plus optional fetchwire flags
  *   (e.g. `skipToken` to send the request without an `Authorization` header).
  * @returns The payload, as produced by `transformResponse`, or the parsed body when no
  *   transform is configured. `undefined` for a `204`, a `205` or any `HEAD`.
  *
- * @throws {ApiError} — the same three codes as `wireRaw`.
+ * @throws {ApiError} with the same three codes as `wireRaw`.
  */
 export async function wireData<T>(
   endpoint: string,

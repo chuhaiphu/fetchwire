@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { fetchClient } from '../cache/fetch-client';
-import type { ApiError } from '../core/api-error';
-import { MutationOptions, ExecuteMutationOptions } from '../interface/react';
+
+import type { MutationOptions, ExecuteMutationOptions } from '../interfaces/react-interfaces.js';
+import type { ApiError } from '../utils/class/api-error.js';
+import { fetchClient } from '../utils/class/fetch-client.js';
 
 interface MutationState<T> {
   data: T | null;
@@ -11,10 +12,10 @@ interface MutationState<T> {
 /**
  * A hook that runs a mutation on demand and tracks its pending and result state.
  *
- * @template T Type of the value `mutationFn` resolves.
- * @template TVariables Type of the input passed to `mutationFn`. Defaults to `void`.
- * @template TError Type of the value `mutationFn` rejects with. Defaults to `ApiError`, what
- *   `wireData` / `wireRaw` throw; set it yourself when `mutationFn` uses another transport.
+ * @template T - Type of the value `mutationFn` resolves.
+ * @template TVariables - Type of the input passed to `mutationFn`. Defaults to `void`.
+ * @template TError - Type of the value `mutationFn` rejects with. Defaults to `ApiError`, what
+ *   `wireData` / `wireRaw` throw. Set it yourself when `mutationFn` uses another transport.
  * @param mutationFn - A Promise-returning function `(variables: TVariables) => Promise<T>`.
  *   fetchwire runs it only when you call `executeMutationFn(variables)`.
  *   Whatever it resolves **is** `data` — fetchwire never inspects or unwraps it.
@@ -22,11 +23,11 @@ interface MutationState<T> {
  *   - `invalidatesTags` — an optional list of tag strings to invalidate after a successful
  *     mutation. Every `useFetch` / `useFetchFn` subscribed to a matching tag refreshes.
  * @returns
- *   - `data` — the resolved data of type `T`, or null.
- *   - `isMutating` — true while the mutation is in flight.
+ *   - `data` — the resolved data of type `T`, or `null`.
+ *   - `isMutating` — `true` while the mutation is in flight.
  *   - `executeMutationFn` — runs `mutationFn(variables)`. `variables` comes first and may be
- *      omitted when `TVariables` is `void`; optional per-call `{ onSuccess, onError }`
- *      callbacks come second.
+ *     omitted when `TVariables` is `void`. Optional per-call `{ onSuccess, onError }`
+ *     callbacks come second.
  *   - `reset` — resets state back to the initial idle state and retires every in-flight run.
  *
  * @example

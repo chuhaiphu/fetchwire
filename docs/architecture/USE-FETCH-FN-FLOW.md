@@ -9,7 +9,7 @@ function for us to call ourselves.
 > control instead of Suspense.
 
 > Everything below is two readings of a _single_ `if/else` inside
-> `execute` ([use-fetch-fn.ts](../../src/hook/use-fetch-fn.ts)):
+> `execute` ([use-fetch-fn.ts](../../src/react/use-fetch-fn.ts)):
 >
 > ```
 > if (!isRefresh && promiseCacheStore.has(fetchKey))  → cache HIT:  reuse the stored promise

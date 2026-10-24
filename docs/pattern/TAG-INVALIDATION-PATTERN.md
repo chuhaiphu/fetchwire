@@ -15,7 +15,7 @@ and the library maps between them.
 
 Every read in fetchwire carries a **`fetchKey`** — a string that is the read's **identity**. fetchwire caches
 the read's promise under this key in a module-level store
-([`promiseCacheStore`](../../src/cache/promise-cache-store.ts)), so two reads with the same `fetchKey` share a
+([`promiseCacheStore`](../../src/utils/class/promise-cache-store.ts)), so two reads with the same `fetchKey` share a
 single cached promise and the same request is never fired twice.
 
 Name it so that two reads share a `fetchKey` **iff** they are the same read and may share a cache entry — the

@@ -1,4 +1,4 @@
-import { ApiError } from '../core/api-error';
+import type { ApiError } from '../utils/class/api-error.js';
 
 /**
  * Optional global interceptors for the request/response lifecycle and errors.
@@ -12,8 +12,8 @@ export interface WireInterceptors {
    * Mutations to `options` are reflected in the actual request: the interceptor and `fetch`
    * share one object.
    *
-   * @param url     The full URL that will be fetched (baseUrl + endpoint).
-   * @param options The final `RequestInit`, including merged headers and the auth token.
+   * @param url - The full URL that will be fetched (`baseUrl + endpoint`).
+   * @param options - The final `RequestInit`, including merged headers and the auth token.
    */
   onRequest?: (url: string, options: RequestInit) => void | Promise<void>;
 
@@ -24,8 +24,8 @@ export interface WireInterceptors {
    * Doing so exhausts the body stream, causing the subsequent read inside `wireRaw` to fail.
    * Use `response.clone()` if you need to read the body here.
    *
-   * @param url      The full URL of the completed request.
-   * @param response The raw `Response` object returned by `fetch`.
+   * @param url - The full URL of the completed request.
+   * @param response - The raw `Response` object returned by `fetch`.
    */
   onResponse?: (url: string, response: Response) => void | Promise<void>;
 
@@ -33,7 +33,7 @@ export interface WireInterceptors {
    * The single global error sink: called for every `ApiError` fetchwire throws, whatever its
    * `code`. Branch on `error.code` to tell a failed HTTP exchange from a failed connection.
    *
-   * Errors raised by your own `onRequest`, `onResponse` or `transformResponse` do not reach it.
+   * Errors thrown by your own `onRequest`, `onResponse` or `transformResponse` do not reach it.
    */
   onError?: (error: ApiError) => void | Promise<void>;
 }
@@ -43,7 +43,7 @@ export interface WireInterceptors {
  */
 export interface WireConfig {
   /**
-   * Base URL that all relative endpoints are appended to, e.g. "https://api.example.com".
+   * Base URL that all relative endpoints are appended to, e.g. `'https://api.example.com'`.
    */
   baseUrl: string;
 
@@ -53,12 +53,12 @@ export interface WireConfig {
    * Merged lowest to highest: **these headers → `Authorization` → per-request headers**.
    *
    * To drop one of these on a single request, delete it from `onRequest`:
-   * `onRequest: (url, options) => (options.headers as Headers).delete("x-client")`.
+   * `onRequest: (url, options) => (options.headers as Headers).delete('x-client')`.
    */
   headers?: HeadersInit;
 
   /**
-   * A Promise-returning function that resolves to the current access token, or null when
+   * A Promise-returning function that resolves to the current access token, or `null` when
    * there is no session.
    *
    * A non-empty token is sent as `Authorization: Bearer <token>`.
@@ -105,4 +105,22 @@ export interface WireRequestInit extends RequestInit {
    * When `true`, fetchwire does **not** call `getToken` and adds **no** `Authorization` header.
    */
   skipToken?: boolean;
+}
+
+/**
+ * Options for `prefetch` and for the `useFetch` and `useFetchFn` hooks.
+ */
+export interface FetchOptions {
+  /**
+   * A unique key that caches this request's Promise.
+   *
+   * The key must be unique across all concurrent fetches. A good convention is to include the
+   * resource name and any dynamic segments, e.g. `'todos'` or `'user-' + userId`.
+   */
+  fetchKey: string;
+
+  /**
+   * An optional list of tag strings this request subscribes to.
+   */
+  tags?: string[];
 }
