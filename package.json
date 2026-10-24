@@ -1,7 +1,7 @@
 {
   "name": "fetchwire",
   "type": "module",
-  "version": "7.0.0",
+  "version": "8.0.0",
   "description": "fetchwire is a thin HTTP client built on top of browser native fetch API. It centralizes request configuration, error handling and a Promise cache.",
   "repository": {
     "type": "git",
