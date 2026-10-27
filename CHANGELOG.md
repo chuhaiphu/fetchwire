@@ -8,6 +8,20 @@ start with **Breaking:**, as in [Common Changelog](https://common-changelog.org/
 [Semantic Versioning](https://semver.org/) from 6.0.0 on; some earlier minor and patch releases
 contain breaking changes. Dates are npm publish dates in UTC.
 
+## [8.0.1] - 2026-10-27
+
+### Changed
+
+- A `useFetchFn` `fetchFn` that throws before it returns a Promise throws out of `executeFetchFn()`
+  and `refreshFetchFn()`, as it does in `useFetch` and `prefetch`. A rejected Promise still lands
+  in `error`.
+
+### Fixed
+
+- A refresh updates every mounted `useFetch` and `useFetchFn` with the same `fetchKey`, not only the
+  hook that refreshed.
+- An invalidation sends one request per `fetchKey`, whatever the number of readers and tags.
+
 ## [8.0.0] - 2026-10-24
 
 ### Changed
@@ -329,6 +343,7 @@ README and JSDoc wording only; the package code is unchanged.
   `useFetchFn` and `useMutationFn`, with tag invalidation and the `onUnauthorized`, `onForbidden`
   and `onError` interceptors.
 
+[8.0.1]: https://github.com/chuhaiphu/fetchwire/compare/v8.0.0...v8.0.1
 [8.0.0]: https://github.com/chuhaiphu/fetchwire/compare/v7.0.0...v8.0.0
 [7.0.0]: https://github.com/chuhaiphu/fetchwire/compare/v6.0.1...v7.0.0
 [6.0.1]: https://github.com/chuhaiphu/fetchwire/compare/v6.0.0...v6.0.1

@@ -466,6 +466,9 @@ const { data: todos, refreshFetch, isRefreshing } = useFetch(getTodosApi, {
 </button>;
 ```
 
+Every mounted `useFetch` and `useFetchFn` with the same `fetchKey` shows the refreshed data, so a list
+and a summary bar that each read `todos` stay equal after one `refreshFetch()`.
+
 Changing `fetchKey` fetches the new key and suspends the component. To keep the current list on
 screen, change the value the key is built from inside `startTransition`:
 
@@ -670,12 +673,14 @@ const { data, error } = useFetchFn<Todo[], AxiosError>(
 | Returns | Description |
 | --- | --- |
 | `data` | The resolved value `T`. |
-| `refreshFetch()` | Calls `fetch` inside `startTransition` and overwrites the cached Promise. |
+| `refreshFetch()` | Calls `fetch` inside `startTransition` and overwrites the cached Promise. Every mounted `useFetch` and `useFetchFn` with the same `fetchKey` shows the new Promise. |
 | `isRefreshing` | `true` while a refresh is pending. |
 
 The hook calls `fetch` when it renders with a `fetchKey` that is not cached, on `refreshFetch()`,
-and on each invalidation of its tags while mounted. A rejection goes to the nearest error boundary,
-and the rejected Promise stays cached.
+and on an invalidation of its tags while mounted, unless another reader of the `fetchKey` has
+already fetched it again for that invalidation. A refresh of its `fetchKey` by another reader
+hands it that reader's Promise, with no request of its own. A rejection goes to the nearest error
+boundary, and the rejected Promise stays cached.
 
 `useFetchFn<T, TError = ApiError>(fetchFn: () => Promise<T>, options: FetchOptions)`
 
@@ -685,12 +690,15 @@ and the rejected Promise stays cached.
 | `isLoading` | `true` while `executeFetchFn()` runs. |
 | `isRefreshing` | `true` while `refreshFetchFn()` runs. |
 | `error` | What the last failed run rejected with, or `null`. |
-| `executeFetchFn()` | Reads the cached Promise of `fetchKey`, or calls `fetchFn`. Resolves the data, or `null` on failure. |
-| `refreshFetchFn()` | Calls `fetchFn` and overwrites the cached Promise. Resolves the data, or `null` on failure. |
+| `executeFetchFn()` | Reads the cached Promise of `fetchKey`, or calls `fetchFn`. Resolves the data, or `null` when the Promise rejects. |
+| `refreshFetchFn()` | Calls `fetchFn` and overwrites the cached Promise. Every mounted `useFetch` and `useFetchFn` with the same `fetchKey` shows the new Promise. Resolves the data, or `null` when the Promise rejects. |
 | `reset()` | Sets the state back to its initial values. The cache stays as it is. |
 
 When runs overlap, only the newest run writes state. When the newest run fails, the hook removes its
-`fetchKey` from the cache. While mounted, each invalidation of its tags calls `refreshFetchFn()`.
+`fetchKey` from the cache. While mounted, an invalidation of its tags calls `refreshFetchFn()`,
+unless another reader of the `fetchKey` has already fetched it again for that invalidation, and a
+refresh of its `fetchKey` by another reader sets its `data`, or its `error` when that refresh
+rejects, with no request of its own.
 
 `useMutationFn<T, TVariables = void, TError = ApiError>(mutationFn: (variables: TVariables) => Promise<T>, options?: MutationOptions)`
 

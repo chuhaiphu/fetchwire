@@ -8,37 +8,40 @@ function for us to call ourselves.
 > shapes of local `useState` (`isLoading`/`isRefreshing`, `data`, `error`). Use this when we want manual
 > control instead of Suspense.
 
-> Everything below is two readings of a _single_ `if/else` inside
-> `execute` ([use-fetch-fn.ts](../../src/react/use-fetch-fn.ts)):
+> Every path below ends in _one_ function, `handlePromise(promise, { isRefresh })`
+> ([use-fetch-fn.ts](../../src/react/use-fetch-fn.ts)): it sets the flags, awaits the promise, and writes
+> `data` or `error`. The three entry points differ only in where the promise comes from:
 >
-> ```
-> if (!isRefresh && promiseCacheStore.has(fetchKey))  → cache HIT:  reuse the stored promise
-> else                                                → cache MISS: fire a fresh request
-> ```
+> | Entry | The promise | `isRefresh` (which flag) |
+> | --- | --- | --- |
+> | `executeFetchFn()` | the cached promise of `fetchKey`, or `fetchFn()` cached when none is | `false` → `isLoading` |
+> | `refreshFetchFn()` | `fetchFn()`, cached, then the fetchKey event emitted | `true` → `isRefreshing` |
+> | the fetchKey event, any reader refreshed | the promise that refresh cached | `true` → `isRefreshing` |
 
 ---
 
 ## Where it fits
 
-Read the map as three bands: **PENDING** (flags on, a serial number claimed), the branch (**hit** reuse /
-**miss** fetch), then **SETTLED** (`fulfilled` / `rejected`). Every path starts and ends in the same two
-bands — that symmetry is what the sequence diagrams below preserve.
+Read the map as three bands: the entry point picks a **promise**, then **PENDING** (flags on, a serial
+number claimed), then **SETTLED** (`fulfilled` / `rejected`). Every path ends in the same two bands — that
+symmetry is what the sequence diagrams below preserve.
 
 ```mermaid
 flowchart LR
-    Cmp["Consumer Component"] -->|"useEffect / handler"| EXE["executeFetchFn()<br/>isRefresh: false"]
-    Cmp -->|"pull-to-refresh / tag event"| REF["refreshFetchFn()<br/>isRefresh: true"]
+    Cmp["Consumer Component"] -->|"useEffect / handler"| EXE{"executeFetchFn()<br/>has(fetchKey)?"}
+    Cmp -->|"pull-to-refresh / tag event"| REF["refreshFetchFn()<br/>fetchFn() → cache promise<br/>register tags → fetchKey<br/>emit fetchKey event"]
+    EV["fetchKey event<br/>(any reader refreshed)"] --> FOL["cache.get(fetchKey)"]
 
-    EXE --> PE["PENDING<br/>setState(isLoading:true, error:null)"]
-    REF --> PR["PENDING<br/>setState(isRefreshing:true, error:null)"]
+    EXE -->|"yes, cache hit"| CACHED["reuse cached promise<br/>register tags → fetchKey"]
+    EXE -->|"no, cache miss"| FRESH["fetchFn() → cache promise<br/>register tags → fetchKey"]
 
-    PE --> BR{"!isRefresh &&<br/>has(fetchKey)?"}
-    PR --> FRESH
-    BR -->|"yes · cache hit"| CACHED["reuse cached promise<br/>register tags → fetchKey<br/>await"]
-    BR -->|"no · cache miss"| FRESH["fn() → cache promise<br/>register tags → fetchKey<br/>await"]
+    CACHED --> PE["handlePromise(promise, { isRefresh: false })<br/>PENDING: setState(isLoading:true, error:null)"]
+    FRESH --> PE
+    REF --> PR["handlePromise(promise, { isRefresh: true })<br/>PENDING: setState(isRefreshing:true, error:null)"]
+    FOL --> PR
 
-    CACHED --> S{"SETTLED"}
-    FRESH --> S
+    PE --> S{"SETTLED"}
+    PR --> S
     S -->|"fulfilled"| OKS["setState { data, isLoading:false,<br/>isRefreshing:false, error:null }"]
     S -->|"rejected"| ERRS["remove(fetchKey)<br/>setState { data:null, error: what fetchFn threw }"]
 ```
@@ -50,9 +53,9 @@ state the consumer reads.
 
 ## executeFetchFn — Cache hit
 
-Reached when `isRefresh` is false **and** the `fetchKey` is already in the Promise cache. That warmth does
-not have to come from [`prefetch`](./PREFETCH-FLOW.md): a previous `executeFetchFn`, a `refreshFetchFn`, or
-a mounted [`useFetch`](./USE-FETCH-FLOW.md) on the same key all write the same store.
+Reached when the `fetchKey` is already in the Promise cache. That warmth does not have to come from
+[`prefetch`](./PREFETCH-FLOW.md): a previous `executeFetchFn`, a `refreshFetchFn`, or a mounted
+[`useFetch`](./USE-FETCH-FLOW.md) on the same key all write the same store.
 
 The practical consequence: **a second `executeFetchFn()` returns the first call's data without touching the
 network.** When we need fresh data, call `refreshFetchFn()`.
@@ -66,24 +69,25 @@ sequenceDiagram
     participant Cache as promiseCacheStore
 
     Note over Cmp,H: nothing fetches on mount — the consumer triggers it<br/>useEffect(() => { executeFetchFn() }, [executeFetchFn])
-    Cmp->>H: executeFetchFn() ⇒ execute({ isRefresh: false })
-
-    rect rgba(128,128,128,0.12)
-        Note over Cmp,Cache: PENDING — flags on, error cleared, and this run claims a serial number
-        H->>H: fn = fetchFnRef.current — the latest fetchFn, read at call time
-        H->>H: requestId = ++latestRequestIdRef.current
-        H->>H: setState(isLoading: true, isRefreshing: false, error: null)
-    end
+    Cmp->>H: executeFetchFn()
 
     H->>Cache: has(fetchKey)
-    Cache-->>H: true → cache HIT, and isRefresh is false so reuse is allowed
+    Cache-->>H: true → cache HIT
 
-    Note over H,Cache: The consumer's `fn` callback is NEVER invoked on this path.<br/>No request leaves the app.
+    Note over H,Cache: The consumer's `fetchFn` is NEVER invoked on this path.<br/>No request leaves the app.
     H->>FC: registerTags(fetchKey, JSON.parse(tagsKey))
     FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
     Note over FC,Cache: registerTags only. This path never calls cachePromiseAndRegisterTags
     H->>Cache: get(fetchKey)
     Cache-->>H: the stored promise — pending, fulfilled, OR already rejected
+    H->>H: handlePromise(that promise, { isRefresh: false })
+
+    rect rgba(128,128,128,0.12)
+        Note over Cmp,Cache: PENDING — flags on, error cleared, and this run claims a serial number
+        H->>H: requestId = ++latestRequestIdRef.current
+        H->>H: setState(isLoading: true, isRefreshing: false, error: null)
+    end
+
     H->>H: data = await that promise
 
     rect rgba(128,128,128,0.12)
@@ -117,30 +121,31 @@ sequenceDiagram
     participant FC as fetchClient
     participant Cache as promiseCacheStore
 
-    Cmp->>H: executeFetchFn() ⇒ execute({ isRefresh: false })
-
-    rect rgba(128,128,128,0.12)
-        Note over Cmp,Cache: PENDING — flags on, error cleared, and this run claims a serial number
-        H->>H: fn = fetchFnRef.current — the latest fetchFn, read at call time
-        H->>H: requestId = ++latestRequestIdRef.current
-        H->>H: setState(isLoading: true, isRefreshing: false, error: null)
-    end
+    Cmp->>H: executeFetchFn()
 
     H->>Cache: has(fetchKey)
     Cache-->>H: false → cache MISS, no one warmed this key
 
-    Note over H,API: `fn` is the consumer's callback, invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
-    H->>Fn: fn()
+    Note over H,API: `fetchFnRef.current` is the latest fetchFn, read at call time, and invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
+    H->>Fn: fetchFnRef.current()
     Fn->>API: HTTP request
     Fn-->>H: promise A (pending)
-    H->>H: rawPromise = A — cached exactly as `fn` returned it, no derived promise
+    H->>H: newPromise = A — cached exactly as `fetchFn` returned it, no derived promise
 
-    H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, JSON.parse(tagsKey))
-    FC->>FC: void rawPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.
-    FC->>Cache: set(fetchKey, rawPromise)
+    H->>FC: cachePromiseAndRegisterTags(fetchKey, newPromise, JSON.parse(tagsKey))
+    FC->>FC: void newPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.
+    FC->>Cache: set(fetchKey, newPromise)
     FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
     Note over H,Cache: cached BEFORE the await, so a concurrent read of the same fetchKey<br/>joins this request instead of starting a second one.
-    H->>H: data = await rawPromise
+    H->>H: handlePromise(newPromise, { isRefresh: false })
+
+    rect rgba(128,128,128,0.12)
+        Note over Cmp,Cache: PENDING — flags on, error cleared, and this run claims a serial number
+        H->>H: requestId = ++latestRequestIdRef.current
+        H->>H: setState(isLoading: true, isRefreshing: false, error: null)
+    end
+
+    H->>H: data = await newPromise
 
     API-->>Fn: response
     Note over Fn,H: A settles → the await resumes
@@ -163,8 +168,9 @@ sequenceDiagram
 
 ## Refresh — tag-driven & manual
 
-A refresh is the same `execute` body with `isRefresh: true`. It always issues a request and always
-overwrites the cache entry.
+A refresh never reads the cache. It always issues a request, always overwrites the cache entry, and emits
+the fetchKey event, so every mounted `useFetch` and `useFetchFn` on the `fetchKey` shows the new promise.
+The event names are explained in [USE-FETCH-FLOW](./USE-FETCH-FLOW.md#refresh--tag-driven--manual).
 
 ```mermaid
 sequenceDiagram
@@ -182,37 +188,43 @@ sequenceDiagram
 
     rect rgba(128,128,128,0.12)
         Note over EM,H: TRIGGER A — tag-driven, reaches EVERY hook instance subscribed to that tag
-        EM->>H: emit(tag) fires the listener → refreshFetchFn()
+        EM->>H: emit(generateTagEventName(tag)) fires refreshFetchFnCb
+        Note over EM,H: refreshFetchFnCb calls refreshFetchFn() only when the fetchKey is not cached.<br/>A cached fetchKey means another reader already refreshed it on this invalidation,<br/>and its fetchKey event has already reached this hook.
     end
 
     rect rgba(128,128,128,0.12)
-        Note over User,H: TRIGGER B — manual, this hook instance ONLY
+        Note over User,H: TRIGGER B — manual
         User->>Cmp: pull-to-refresh / retry button
         Cmp->>H: refreshFetchFn()
     end
 
-    H->>H: execute({ isRefresh: true })
+    Note over H,API: `fetchFnRef.current` is the latest fetchFn, read at call time, and invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
+    H->>Fn: fetchFnRef.current()
+    Fn->>API: HTTP request
+    Fn-->>H: promise A (pending)
+    H->>H: newPromise = A — cached exactly as `fetchFn` returned it, no derived promise
+
+    H->>FC: cachePromiseAndRegisterTags(fetchKey, newPromise, JSON.parse(tagsKey))
+    FC->>FC: void newPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.
+    FC->>Cache: set(fetchKey, newPromise) — replaces whatever was stored
+    FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
+
+    rect rgba(128,128,128,0.12)
+        Note over EM,H: ANNOUNCE — this refresh replaced the promise every reader of the fetchKey shows
+        H->>EM: emit(generateFetchKeyEventName(fetchKey))
+        EM->>H: EVERY mounted useFetchFn on this fetchKey: handlePromise(cache.get(fetchKey), { isRefresh: true })
+        Note over EM,H: Each one awaits newPromise as a refresh. A useFetch on the key sets newPromise<br/>as its promise (USE-FETCH-FLOW). This hook is a listener too: that run starts first,<br/>so the handlePromise below is the newer run, and the one that writes state.
+    end
+
+    H->>H: handlePromise(newPromise, { isRefresh: true })
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,Cache: PENDING — isRefreshing instead of isLoading, so the consumer can keep the old UI
-        H->>H: fn = fetchFnRef.current — the latest fetchFn, read at call time
         H->>H: requestId = ++latestRequestIdRef.current
         H->>H: setState(isLoading: false, isRefreshing: true, error: null)
     end
 
-    Note over H,Cache: isRefresh makes the left operand false, so `&&` short-circuits and<br/>has(fetchKey) is never consulted — the cache read is skipped, not bypassed.
-
-    Note over H,API: `fn` is the consumer's callback, invoked exactly ONCE.<br/>Its promise is cached as-is — fetchwire derives nothing from it.
-    H->>Fn: fn()
-    Fn->>API: HTTP request
-    Fn-->>H: promise A (pending)
-    H->>H: rawPromise = A — cached exactly as `fn` returned it, no derived promise
-
-    H->>FC: cachePromiseAndRegisterTags(fetchKey, rawPromise, JSON.parse(tagsKey))
-    FC->>FC: void rawPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.
-    FC->>Cache: set(fetchKey, rawPromise) — replaces whatever was stored
-    FC->>FC: map each tag → fetchKey (tagToFetchKeysMap) — rebuilds what invalidateTags wiped
-    H->>H: data = await rawPromise
+    H->>H: data = await newPromise
 
     API-->>Fn: response
     Note over Fn,H: A settles → the await resumes
@@ -235,46 +247,18 @@ sequenceDiagram
 > _first_ load (skeleton) from a _background_ refresh (keep old UI, show a spinner). `isLoading` is set
 > only when `isRefresh` is false.
 
-> **Why only the newest run may write.** `execute` is fed by sources that do not know about each other —
-> the consumer's effect, a tag listener, a pull-to-refresh — so several runs can be in flight against one
-> shared state, and responses arrive in a different order than they were sent. Each run claims a serial
-> number on entry (`++latestRequestIdRef.current`) and may write only while it still holds the latest one.
-> Without it the slowest run wins by landing last, which shows the **older** data.
+> **Why only the newest run writes state.** Two `handlePromise` runs can overlap, for example a
+> pull-to-refresh that starts while the first load is still in flight, and their responses can arrive in
+> either order. Each run takes a number when it starts (`++latestRequestIdRef.current`) and writes state
+> only if no later run has started since. So the hook shows the response of the request started last,
+> even when an older response arrives after it.
 
 > **Why `tagsKey = JSON.stringify(tags)`.** `options.tags` is a new array on every render. Here the
 > serialized string does double duty: it keeps the subscription `useEffect` from re-running each render,
-> **and** it is a dependency of the `useCallback` that memoizes `execute` — without a stable primitive,
-> `executeFetchFn` would change identity every render and the consumer's
+> **and** it is a dependency of the `useCallback`s that memoize `executeFetchFn` and `refreshFetchFn` —
+> without a stable primitive, `executeFetchFn` would change identity every render and the consumer's
 > `useEffect(() => { executeFetchFn() }, [executeFetchFn])` would loop forever. The array is read back
 > with `JSON.parse` inside the callback, so a tag may contain any character.
-
----
-
-## Notes
-
-- **State.** `useFetchFn` is the imperative counterpart to `useFetch`. Errors land in
-  `error` for the consumer to render inline; nothing is thrown to an `ErrorBoundary` and nothing suspends.
-  Choose it when we need a retry button, conditional/lazy fetching, or an error message beside the data
-  rather than a boundary fallback. → [USE-FETCH-FLOW](./USE-FETCH-FLOW.md) for the Suspense variant.
-- **A repeat `executeFetchFn()` does not refetch.** The first call caches its promise under `fetchKey`, so
-  the next call takes the cache-hit path and resolves to the same data without a request. Use
-  `refreshFetchFn()` to force the network.
-- **A tag event refreshes this hook even if it never fetched.** The subscription `useEffect` runs on mount
-  unconditionally, so a mutation invalidating a subscribed tag calls `refreshFetchFn()` — and issues a
-  request — on a hook whose consumer never called `executeFetchFn()`. For a screen that must stay idle
-  until asked, omit `tags` and refresh it manually.
-- **Overlapping runs resolve by recency, not by arrival.** Two `refreshFetchFn()` calls (or a
-  `fetchKey` that changes while a run is in flight) produce two independent requests writing one
-  state. The newer run always wins, whichever response lands last.
-- **`reset()`** returns state to the idle shape (`data:null, isLoading:false, isRefreshing:false,
-  error:null`) and retires every in-flight run, so a late response cannot resurrect what was just
-  cleared. It does not touch the Promise cache.
-- **Tags register on every call.** The promise cache and the tag map
-  (`tagToFetchKeysMap`) are independent; a warm key means only the first one is already done, so the
-  cache-hit path registers `tags` too. Registrations _accumulate as a union_ (never overridden), so a
-  [`prefetch`](./PREFETCH-FLOW.md) and the reader consuming the same `fetchKey` should declare the **same**
-  `tags` — differing sets only make the key invalidatable by _both_, an extra (safe) refetch rather than
-  stale data.
 
 ---
 

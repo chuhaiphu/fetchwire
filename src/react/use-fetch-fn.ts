@@ -5,6 +5,8 @@ import type { ApiError } from '../utils/class/api-error.js';
 import { eventEmitter } from '../utils/class/event-emitter.js';
 import { fetchClient } from '../utils/class/fetch-client.js';
 import { promiseCacheStore } from '../utils/class/promise-cache-store.js';
+import { generateFetchKeyEventName } from '../utils/generator/generate-fetch-key-event-name.js';
+import { generateTagEventName } from '../utils/generator/generate-tag-event-name.js';
 
 interface FetchState<T, TError> {
   data: T | null;
@@ -36,7 +38,8 @@ interface FetchState<T, TError> {
  *   - `error` — whatever the last failed run rejected with, untouched, otherwise `null`.
  *   - `executeFetchFn` — manually triggers the initial fetch.
  *   - `refreshFetchFn` — manually triggers a refresh: skips the cache read and
- *     overwrites the cached Promise with the new one.
+ *     overwrites the cached Promise with the new one. Every mounted `useFetch` and `useFetchFn` on
+ *     the same `fetchKey` shows the new data.
  *   - `reset` — resets state back to the initial idle state and retires every
  *     in-flight run, so a late response cannot overwrite what was just cleared.
  */
@@ -61,29 +64,19 @@ export function useFetchFn<T, TError = ApiError>(
   const fetchKey = options.fetchKey;
   const tagsKey = JSON.stringify(options.tags ?? []);
 
-  const execute = useCallback(
-    async (execOptions: { isRefresh: boolean }): Promise<T | null> => {
-      const fn = fetchFnRef.current;
+  const handlePromise = useCallback(
+    async (promise: Promise<T>, handleOptions: { isRefresh: boolean }): Promise<T | null> => {
       const requestId = ++latestRequestIdRef.current;
-      const tags = JSON.parse(tagsKey) as string[];
 
       setState((prev) => ({
         ...prev,
-        isLoading: !execOptions.isRefresh,
-        isRefreshing: execOptions.isRefresh,
+        isLoading: !handleOptions.isRefresh,
+        isRefreshing: handleOptions.isRefresh,
         error: null,
       }));
 
       try {
-        let data: T;
-        if (!execOptions.isRefresh && promiseCacheStore.has(fetchKey)) {
-          fetchClient.registerTags(fetchKey, tags);
-          data = (await promiseCacheStore.get(fetchKey)) as T;
-        } else {
-          const rawPromise = fn();
-          fetchClient.cachePromiseAndRegisterTags(fetchKey, rawPromise, tags);
-          data = await rawPromise;
-        }
+        const data = await promise;
 
         if (requestId === latestRequestIdRef.current) {
           setState({
@@ -108,11 +101,28 @@ export function useFetchFn<T, TError = ApiError>(
         return null;
       }
     },
-    [fetchKey, tagsKey],
+    [fetchKey],
   );
 
-  const executeFetchFn = useCallback(() => execute({ isRefresh: false }), [execute]);
-  const refreshFetchFn = useCallback(() => execute({ isRefresh: true }), [execute]);
+  const executeFetchFn = useCallback(() => {
+    const tags = JSON.parse(tagsKey) as string[];
+
+    if (promiseCacheStore.has(fetchKey)) {
+      fetchClient.registerTags(fetchKey, tags);
+      return handlePromise(promiseCacheStore.get(fetchKey) as Promise<T>, { isRefresh: false });
+    }
+
+    const newPromise = fetchFnRef.current();
+    fetchClient.cachePromiseAndRegisterTags(fetchKey, newPromise, tags);
+    return handlePromise(newPromise, { isRefresh: false });
+  }, [fetchKey, tagsKey, handlePromise]);
+
+  const refreshFetchFn = useCallback(() => {
+    const newPromise = fetchFnRef.current();
+    fetchClient.cachePromiseAndRegisterTags(fetchKey, newPromise, JSON.parse(tagsKey) as string[]);
+    eventEmitter.emit(generateFetchKeyEventName(fetchKey));
+    return handlePromise(newPromise, { isRefresh: true });
+  }, [fetchKey, tagsKey, handlePromise]);
 
   const reset = useCallback(() => {
     latestRequestIdRef.current++;
@@ -128,13 +138,28 @@ export function useFetchFn<T, TError = ApiError>(
     const tags = JSON.parse(tagsKey) as string[];
     if (tags.length === 0) return;
 
+    fetchClient.registerTags(fetchKey, tags);
+
+    // invalidateTags removed this fetchKey from the cache.
+    // The first reader to hear a tag refreshes it with a fetch request,
+    // a later one only get a Promise that already cached.
+    const refreshFetchFnCb = () => {
+      if (promiseCacheStore.has(fetchKey)) return;
+      refreshFetchFn();
+    };
+
     const subscriptions = tags.map((tag) =>
-      eventEmitter.addListener(tag, () => {
-        refreshFetchFn();
-      }),
+      eventEmitter.addListener(generateTagEventName(tag), refreshFetchFnCb),
     );
     return () => subscriptions.forEach((subscription) => subscription.remove());
-  }, [tagsKey, refreshFetchFn]);
+  }, [fetchKey, tagsKey, refreshFetchFn]);
+
+  useEffect(() => {
+    const subscription = eventEmitter.addListener(generateFetchKeyEventName(fetchKey), () => {
+      handlePromise(promiseCacheStore.get(fetchKey) as Promise<T>, { isRefresh: true });
+    });
+    return () => subscription.remove();
+  }, [fetchKey, handlePromise]);
 
   return { ...state, executeFetchFn, refreshFetchFn, reset };
 }

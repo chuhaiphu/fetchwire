@@ -72,11 +72,17 @@ The relationship is many-to-many:
 |                        | Channel A — `eventEmitter`                                          | Channel B — `tagToFetchKeysMap`                                          |
 | ---------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | **Purpose**            | refresh readers **currently mounted**                               | evict cache for readers **not mounted**                                  |
-| **How**                | reader subscribed each tag on mount → `emit(tag)` fires its refresh | delete every fetchKey linked to the tag from `promiseCacheStore`         |
+| **How**                | reader subscribed each tag on mount → `emit(generateTagEventName(tag))` fires its refresh | delete every fetchKey linked to the tag from `promiseCacheStore`         |
 | **If it were missing** | a visible list would keep showing old data                          | an unmounted screen would re-mount later onto a **stale cached promise** |
 
 Channel A keeps live UI correct _now_; Channel B keeps the cache correct for _later_. A write needs both,
 which is why `invalidateTags` both deletes keys **and** emits.
+
+`invalidateTags` runs Channel B for every tag before Channel A emits the first one, and keeps the tag →
+fetchKey links. A reader's tag listener refreshes only a `fetchKey` that is not cached: the first reader
+of a key refreshes it, and its fetchKey event shows the new promise to every other reader of that key.
+So one invalidation sends one request per `fetchKey`, whatever the number of readers and tags.
+→ [USE-FETCH-FLOW](../architecture/USE-FETCH-FLOW.md#refresh--tag-driven--manual)
 
 ### The two write-side methods
 

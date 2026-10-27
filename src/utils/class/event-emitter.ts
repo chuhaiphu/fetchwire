@@ -4,8 +4,9 @@ class EventEmitter {
   /**
    * @example
    * Map {
-   *   "users" => Set { [Function: refetchUsers], [Function: refetchProfile] },
-   *   "posts" => Set { [Function: refetchPosts] }
+   *   "tag:users" => Set { [Function: refetchUsers], [Function: refetchProfile] },
+   *   "tag:posts" => Set { [Function: refetchPosts] },
+   *   "fetchKey:user-list" => Set { [Function: showRefreshedUsers] }
    * }
    */
   private readonly events = new Map<string, Set<Listener>>();
@@ -30,18 +31,18 @@ class EventEmitter {
           return;
         }
 
-        // Remove the listener function from the tag's Set via its reference.
+        // Remove the listener function from the event's Set via its reference.
         // Before: Set { [Function: refetchUsers], [Function: refetchProfile] }
         // After:  Set { [Function: refetchProfile] }
         currentListeners.delete(listener);
 
-        // If the tag's Set is empty, remove the entire tag entry (key and empty Set) from the Map.
+        // If the event's Set is empty, remove the entire event entry (key and empty Set) from the Map.
         // Before: Map {
-        //              "users" => Set {},
-        //              "posts" => Set { [Function: refetchPosts] }
+        //              "tag:users" => Set {},
+        //              "tag:posts" => Set { [Function: refetchPosts] }
         //            }
         // After: Map {
-        //              "posts" => Set { [Function: refetchPosts] }
+        //              "tag:posts" => Set { [Function: refetchPosts] }
         //            }
         if (currentListeners.size === 0) {
           this.events.delete(event);
@@ -66,7 +67,7 @@ class EventEmitter {
     //   and immediately re-subscribes via `addListener()` (.add) synchronously,
     //   JavaScript's `Set` iterator will execute the re-added listener at the end of the Set,
     //   which calls `remove()` again, causing an endless loop.
-    // - Case 2 (Unintended execution): If a running listener registers a new listener for the same tag,
+    // - Case 2 (Unintended execution): If a running listener registers a new listener for the same event,
     //   the live `Set` iterator will also execute that newly added listener in the current cycle.
     //
     // `Array.from(listeners)` captures the exact list of listeners at the moment `emit()` was called.

@@ -4,6 +4,8 @@ import type { FetchOptions } from '../interfaces/core-interfaces.js';
 import { eventEmitter } from '../utils/class/event-emitter.js';
 import { fetchClient } from '../utils/class/fetch-client.js';
 import { promiseCacheStore } from '../utils/class/promise-cache-store.js';
+import { generateFetchKeyEventName } from '../utils/generator/generate-fetch-key-event-name.js';
+import { generateTagEventName } from '../utils/generator/generate-tag-event-name.js';
 
 /**
  * A hook that fetches immediately on mount and suspends the component while data is loading.
@@ -37,6 +39,7 @@ import { promiseCacheStore } from '../utils/class/promise-cache-store.js';
  *   - `data` — the resolved value of type `T`.
  *   - `refreshFetch` — manually triggers a refresh while the component is mounted.
  *     Uses `useTransition` internally so the current data stays visible while the refresh loads.
+ *     Every mounted `useFetch` and `useFetchFn` on the same `fetchKey` shows the new data.
  *
  *     **refreshFetch CANNOT be used to retry from an ErrorBoundary**: when the boundary catches
  *     an error the component is unmounted, so `refreshFetch` is inaccessible. Call
@@ -89,17 +92,36 @@ export function useFetch<T>(
     startTransition(() => {
       setPromise(newPromise);
     });
+    eventEmitter.emit(generateFetchKeyEventName(fetchKey));
   }, [fetchKey, tagsKey]);
+
+  useEffect(() => {
+    const subscription = eventEmitter.addListener(generateFetchKeyEventName(fetchKey), () => {
+      const refreshedPromise = promiseCacheStore.get(fetchKey) as Promise<T>;
+      startTransition(() => {
+        setPromise(refreshedPromise);
+      });
+    });
+    return () => subscription.remove();
+  }, [fetchKey]);
 
   useEffect(() => {
     const subscribedTags = JSON.parse(tagsKey) as string[];
     if (subscribedTags.length === 0) return;
 
+    // invalidateTags removed this fetchKey from the cache.
+    // The first reader to hear a tag refreshes it with a fetch request,
+    // a later one only get a Promise that already cached.
+    const refreshFetchCb = () => {
+      if (promiseCacheStore.has(fetchKey)) return;
+      refreshFetch();
+    };
+
     const subscriptions = subscribedTags.map((tag) =>
-      eventEmitter.addListener(tag, refreshFetch),
+      eventEmitter.addListener(generateTagEventName(tag), refreshFetchCb),
     );
     return () => subscriptions.forEach((subscription) => subscription.remove());
-  }, [tagsKey, refreshFetch]);
+  }, [fetchKey, tagsKey, refreshFetch]);
 
   return { data: use(promise), refreshFetch, isRefreshing: isPending };
 }

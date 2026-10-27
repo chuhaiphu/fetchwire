@@ -100,7 +100,7 @@ sequenceDiagram
         alt fulfilled
             React-->>H: use(promise) returns the value, whatever it is — the hook does not judge it
             H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
-            Note over React: this render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
+            Note over React: this render commits → useEffect finally runs →<br/>eventEmitter subscribes the fetchKey event and one event per tag
         else rejected
             React-->>Cmp: use(promise) throws the rejection value → nearest Error Boundary fallback shown
         end
@@ -167,7 +167,7 @@ sequenceDiagram
         alt fulfilled
             React-->>H: use(promise) returns the value, whatever it is — the hook does not judge it
             H-->>Cmp: return { data, refreshFetch, isRefreshing: false }
-            Note over React: this render commits → useEffect finally runs →<br/>eventEmitter.addListener(tag, refreshFetch) per tag
+            Note over React: this render commits → useEffect finally runs →<br/>eventEmitter subscribes the fetchKey event and one event per tag
         else rejected
             React-->>Cmp: use(promise) throws the rejection value → nearest Error Boundary fallback shown<br/>(component unmounts — rawPromise stays cached as rejected)
         end
@@ -178,10 +178,23 @@ sequenceDiagram
 
 ## Refresh — tag-driven & manual
 
-A mounted `useFetch` subscribes each of its `tags` to the `eventEmitter`. A
-[`useMutationFn`](./USE-MUTATION-FN-FLOW.md) that invalidates a matching tag — or a manual
+A mounted `useFetch` subscribes two kinds of event on the `eventEmitter`, each name built by its own
+generator so the two never collide:
+
+| Event | Name | Emitted by | The listener |
+| --- | --- | --- | --- |
+| a tag event | `generateTagEventName(tag)`, e.g. `tag:todos` | `invalidateTags` | calls `refreshFetch()` |
+| the fetchKey event | `generateFetchKeyEventName(fetchKey)`, e.g. `fetchKey:todos` | `refreshFetch()` and `refreshFetchFn()` | sets the Promise cached under the `fetchKey` |
+
+A [`useMutationFn`](./USE-MUTATION-FN-FLOW.md) that invalidates a matching tag — or a manual
 `refreshFetch()` call — swaps in a **new** promise **without** unmounting, keeping current data visible via
-`useTransition`.
+`useTransition`. The fetchKey event then hands that promise to **every** mounted reader of the
+`fetchKey`, so a list and a summary bar reading the same key show the same data.
+
+> **Why the two names carry a prefix.** A read may declare a tag spelled like its own `fetchKey`
+> (`{ fetchKey: 'todos', tags: ['todos'] }`). With bare names, the fetchKey event of a refresh would reach
+> that tag's listener, which refreshes and emits the fetchKey event again, without end. `tag:` and
+> `fetchKey:` keep the two kinds of event apart for every spelling.
 
 ```mermaid
 sequenceDiagram
@@ -196,7 +209,7 @@ sequenceDiagram
     participant API as Server (via wireData / wireRaw)
     participant React as React runtime
 
-    Note over Cmp,React: PRECONDITION — this useFetch is mounted and one of its renders already committed,<br/>so its useEffect ran → eventEmitter.addListener(tag, refreshFetch) per tag.<br/>A reader that never committed holds no subscription and cannot be tag-refreshed.
+    Note over Cmp,React: PRECONDITION — this useFetch is mounted and one of its renders already committed,<br/>so its useEffect ran → it subscribes the fetchKey event and one event per tag.<br/>A reader that never committed holds no subscription and cannot be tag-refreshed.
 
     rect rgba(128,128,128,0.12)
         Note over Cmp,EM: TRIGGER A — tag-driven, and it does TWO independent jobs
@@ -205,18 +218,19 @@ sequenceDiagram
         Mut->>FC: invalidateTags(invalidatesTags)
 
         Note over FC,Cache: JOB 1 — cache level, serves readers that are NOT mounted
-        FC->>Cache: delete(fetchKey) for every key mapped to the tag
-        FC->>FC: tagToFetchKeysMap.delete(tag)
+        FC->>Cache: delete(fetchKey) for every key mapped to ANY of the tags, before the first emit
+        Note over FC,Cache: the tag → fetchKey links stay in tagToFetchKeysMap
 
         Note over EM,H: JOB 2 — component level, serves readers that ARE mounted
-        FC->>EM: emit(tag)
-        EM->>H: refreshFetch() — invoked synchronously on EVERY listener of that tag
+        FC->>EM: emit(generateTagEventName(tag)), once per tag
+        EM->>H: refreshFetchCb() on EVERY listener of that tag
+        Note over EM,H: The first reader of a fetchKey finds it uncached and calls refreshFetch().<br/>Every later listener of that fetchKey, on this tag or the next, finds the new promise<br/>cached and returns: refreshFetch's fetchKey event has already shown it.<br/>So one invalidation sends one request per fetchKey.
     end
 
     rect rgba(128,128,128,0.12)
-        Note over Cmp,H: TRIGGER B — manual, this reader ONLY
+        Note over Cmp,H: TRIGGER B — manual
         Cmp->>H: refreshFetch() (pull-to-refresh / retry button)
-        Note over Cmp,H: No invalidateTags on this path — nothing is deleted from the cache<br/>and no other reader sharing the tag is notified.
+        Note over Cmp,H: No invalidateTags on this path — nothing is deleted from the cache<br/>and no tag event is emitted. The fetchKey event at the end of the body<br/>still reaches every reader of this fetchKey.
     end
 
     rect rgba(128,128,128,0.12)
@@ -232,10 +246,14 @@ sequenceDiagram
         H->>FC: cachePromiseAndRegisterTags(fetchKey, newPromise, tags)
         FC->>FC: void newPromise.catch(() => {}) — attach a no-op rejection listener<br/>so a promise nobody reads cannot fire unhandledrejection.<br/>The promise stays rejected — use() still throws to the Error Boundary.
         FC->>Cache: set(fetchKey, newPromise)
-        FC->>FC: map each tag → fetchKey (tagToFetchKeysMap) — rebuilds what JOB 1 wiped
+        FC->>FC: map each tag → fetchKey (tagToFetchKeysMap)
 
         H->>React: startTransition(() => setPromise(newPromise))
         Note over H,React: setPromise is React state — it only takes effect while the component is mounted.
+
+        H->>EM: emit(generateFetchKeyEventName(fetchKey))
+        EM->>H: EVERY mounted useFetch on this fetchKey: startTransition(() => setPromise(cache.get(fetchKey)))
+        Note over EM,H: Each other reader takes newPromise and runs the UPDATE below on its own.<br/>A useFetchFn on the key awaits newPromise as a refresh (USE-FETCH-FN-FLOW).<br/>This reader is a listener too: it sets newPromise again, which changes nothing.
     end
 
     alt reader still mounted
@@ -337,42 +355,19 @@ sequenceDiagram
     Note over Cache,React: promise B settles<br/>React retries the suspended tree — fulfilled → data, rejected → Error Boundary
 ```
 
-> **Why the promise is re-pointed during render, not in an Effect.** An Effect runs only after a render
-> commits, so the browser would paint one frame of the previous key's data under the new key before the
-> correction landed. Setting state during render keeps that frame from existing: React calls the
-> component again before its children render and before the DOM is touched. The
-> `fetchKey !== previousFetchKey` comparison is what keeps it from looping. (React's documented pattern
-> for adjusting state when a prop changes —
-> [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect).)
+> **Why the hook switches the promise during render, not in an Effect.** When `fetchKey` changes, the
+> old key's data must leave the screen at once. An Effect runs only after React has drawn the screen,
+> so a switch there would draw one frame of the old key's data under the new key. A `setPromise` call
+> during render makes React discard that render and run the component again before it draws anything.
+> The check `fetchKey !== previousFetchKey` makes the switch run once per key change, so the render
+> does not loop. React documents this in
+> [Adjusting some state when a prop changes](https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes).
 
 > **Why a key change suspends but a refresh does not.** `refreshFetch` swaps the promise inside
 > `startTransition`, which is what keeps the current data on screen. This swap runs during render, with no
 > `startTransition` around it, so the update stays urgent and the Suspense fallback replaces the current
 > data. Keeping it on screen is the caller's job — change whatever the key is built from inside their own
 > `startTransition`.
-
----
-
-## Notes
-
-- **Boundaries are the consumer's responsibility.** `useFetch` returns no `isLoading`/`error` for the
-  initial fetch — those states _are_ the `<Suspense>` and `<ErrorBoundary>` around the component. For an
-  imperative, flag-based read, use [`useFetchFn`](./USE-FETCH-FN-FLOW.md).
-- **`fetchKey` is the identity of the read.** It dedupes concurrent reads, links a
-  [`prefetch`](./PREFETCH-FLOW.md) to the hook that later consumes it, and is the unit that
-  `fetchClient.invalidateTags` clears.
-- **`tags` connect reads to writes.** A read subscribes to tags; a
-  [mutation](./USE-MUTATION-FN-FLOW.md) invalidates tags.
-- **Two stores, not one — tags register on every call.** The promise cache and the tag map
-  (`tagToFetchKeysMap`) are independent; a warm key means only the first one is already done, so the
-  cache-hit path registers `tags` too. Registrations _accumulate as a union_ (never overridden), so a
-  [`prefetch`](./PREFETCH-FLOW.md) and the reader consuming the same `fetchKey` should declare the **same**
-  `tags` — differing sets only make the key invalidatable by _both_, an extra (safe) refetch rather than
-  stale data.
-- **`refreshFetch` requires a mounted component.** It sets internal promise state via `useTransition`, so
-  it only has an effect while the component is rendered. To force a fresh fetch from _outside_ a mounted
-  reader (e.g. resetting a rejected key), clear the cache with `fetchClient.remove(fetchKey)` and let the
-  next mount re-fetch.
 
 ---
 

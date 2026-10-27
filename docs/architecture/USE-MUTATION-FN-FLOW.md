@@ -43,9 +43,9 @@ flowchart LR
 
     TRY -->|"fulfilled"| OKS["setState { data, isMutating: false }"]
     OKS --> INV["invalidateTags(tags)"]
-    INV --> CLR["JOB 1 — delete every fetchKey<br/>mapped to the tag"]
-    INV --> EMIT["JOB 2 — eventEmitter.emit(tag)"]
-    EMIT --> RD["mounted readers subscribed<br/>to the tag → refresh"]
+    INV --> CLR["JOB 1 — delete every fetchKey<br/>mapped to any of the tags"]
+    INV --> EMIT["JOB 2 — eventEmitter.emit(generateTagEventName(tag))"]
+    EMIT --> RD["mounted readers subscribed<br/>to the tag → one refresh per fetchKey"]
     INV --> OK["onSuccess(result ?? null) → return result"]
 ```
 
@@ -98,12 +98,13 @@ sequenceDiagram
             loop each non-empty tag
                 Note over FC,Cache: JOB 1 — cache level, serves readers that are NOT mounted
                 FC->>Cache: delete(fetchKey) for every key mapped to the tag
-                FC->>FC: tagToFetchKeysMap.delete(tag)
-
+            end
+            Note over FC,Cache: every key is cleared before the first emit, and the tag → fetchKey links stay
+            loop each non-empty tag
                 Note over EM,RD: JOB 2 — component level, serves readers that ARE mounted
-                FC->>EM: emit(tag)
-                EM->>RD: refreshFetch / refreshFetchFn — invoked synchronously on EVERY listener of that tag
-                RD->>API: each mounted reader re-reads (see its own flow)
+                FC->>EM: emit(generateTagEventName(tag))
+                EM->>RD: on EVERY listener of that tag, a refresh when its fetchKey is not cached
+                RD->>API: the first reader of each fetchKey re-reads (see its own flow);<br/>the others show its promise through the fetchKey event
             end
         end
 
@@ -181,36 +182,6 @@ flowchart TB
     K2 --> R2["reader on tripA refreshes"]
     K3 --> R3["reader on tripB refreshes"]
 ```
-
----
-
-## Notes
-
-- **Callbacks are awaited — so `isMutating` and the returned Promise mean different things.**
-  `onSuccess` / `onError` may return a Promise, and `executeMutationFn` waits for it. So
-  `await executeMutationFn(...)` means "the write **and** everything the caller queued after it are
-  done", while `isMutating` went false earlier — it tracks the **request**, not the callback. A callback
-  that rejects rejects `executeMutationFn` (it does **not** route to `onError`, which lives inside the
-  narrowed `try`).
-- **Overlapping runs resolve by recency, not by arrival.** Two `executeMutationFn()` calls produce two
-  independent requests writing one state. The newer run always wins, whichever response lands last — but
-  both runs still invalidate their tags and still call their own callbacks.
-- **Collection vs entity tags.** A broad tag (`'entity-list'`) refreshes _every_ reader of that collection
-  in one write — simple, at the cost of refetching readers that may not have changed. A narrow, per-entity
-  tag (`'entity-list-' + id`) refreshes exactly one. Choosing the granularity is the caller's modeling
-  decision; fetchwire treats every tag identically.
-- **`onSuccess` and the return value carry the same thing.** Both are whatever `mutationFn` resolved:
-  `onSuccess` is passed `result ?? null`, and `executeMutationFn` returns `result` itself. The hook never
-  inspects or unwraps it. To reach transport metadata such as `status`, have `mutationFn` call
-  [`wireRaw`](../../src/core/wire.ts) instead of `wireData`.
-- **Unmounting the caller does not abandon the write.** A mutation whose component unmounts before the
-  request settles still invalidates its tags and still calls `onSuccess` / `onError`. Only `setState` is
-  lost, and only because React drops it — the cache and the caller's callbacks are not the component's to
-  cancel. Write `onSuccess` / `onError` so they tolerate running after their component is gone: reach for
-  a router, a store, or an alert rather than a `setState` the caller no longer owns.
-- **`reset()`** returns state to the idle shape (`data:null, isMutating:false`) and retires every in-flight
-  run, so a late response cannot resurrect what was just cleared. It does not touch the Promise cache and
-  emits nothing.
 
 ---
 
